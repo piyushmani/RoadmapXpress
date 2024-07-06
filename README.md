@@ -1,8 +1,4 @@
-# RoadmapXpress
-
-![roadmapXpress Logo](images/roadmapxpress-logo.png)
-
-Welcome to **roadmapXpress**, your comprehensive guide to mastering any topic with structured learning paths and free resources.
+# RoadmapXpress <img src="https://github.com/piyushmani/RoadmapXpress/blob/main/assets/test1.png" align="right" width="50" height="50" alt="roadmapXpress Logo">
 
 
 ## Table of Contents
@@ -17,18 +13,13 @@ Welcome to **roadmapXpress**, your comprehensive guide to mastering any topic wi
 
 ## Features
 
-- **Learning Journey**: Guides users through various topics with clear, step-by-step learning paths.
-  ![Learning Journey](images/learning-journey.png)
-
-- **Backend Roadmap**: Provides a detailed learning path for backend development.
-  ![Backend Roadmap](images/backend-roadmap.png)
 
 - **Navigate Learning**: Helps users start from the basics and progress smoothly to more complex concepts.
-  ![Navigate Learning](images/navigate-learning.png)
+  ![Navigate Learning](https://github.com/piyushmani/RoadmapXpress/blob/main/assets/roadmap.png)
 
 - **Resources**: Offers free resources for each topic.
-  ![Resources](images/resources.png)
+  ![Resources](https://github.com/piyushmani/RoadmapXpress/blob/main/assets/resources.png)
 
 - **Handwritten Style**: Features a unique look and feel with a handwritten style and customizable themes.
-  ![Handwritten Style](images/handwritten-style.png)
+  ![Handwritten Style](https://github.com/piyushmani/RoadmapXpress/blob/main/assets/theme.jpg)
 
