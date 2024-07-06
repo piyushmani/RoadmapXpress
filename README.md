@@ -1,4 +1,4 @@
-# RoadmapXpress <img src="https://github.com/piyushmani/RoadmapXpress/blob/main/assets/test1.png" align="right" width="50" height="50" alt="roadmapXpress Logo">
+# RoadmapXpress <img src="https://github.com/piyushmani/RoadmapXpress/blob/main/assets/test1.png" align="right" width="130" height="30" alt="roadmapXpress Logo">
 
 
 ## Table of Contents
@@ -22,4 +22,11 @@
 
 - **Handwritten Style**: Features a unique look and feel with a handwritten style and customizable themes.
   ![Handwritten Style](https://github.com/piyushmani/RoadmapXpress/blob/main/assets/theme.jpg)
+
+## Contact
+
+If you have any suggestions, or just want to say hello, feel free to reach out!
+
+- **Email**: [piyushrajmani@gmail.com](mailto:piyushrajmani@gmail.com)
+- **GitHub**: [roadmapXpress Repository](https://github.com/piyushmani/RoadmapXpress)
 
