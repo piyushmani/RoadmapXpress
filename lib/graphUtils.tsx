@@ -1,3 +1,4 @@
+// @ts-nocheck
 export const defaultVertexStyle = {
     fontSize: 11,
     strokeColor: '#B3B3B3',

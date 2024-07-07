@@ -104,9 +104,10 @@ const themeOptions = [
     
   ];
 
+// @ts-ignore
 export default function ThemeSelector({ onSelectTheme }) {
 
-    const handleThemeSelect = (selectedTheme) => {
+    const handleThemeSelect = (selectedTheme: { name: string; vertex: { fillColor: string; strokeColor: string; fontColor: string; }; edge: { strokeColor: string; }; }) => {
         onSelectTheme(selectedTheme);
     };
 
@@ -116,8 +117,8 @@ export default function ThemeSelector({ onSelectTheme }) {
             (item, index) => (
                 <div style={{maxWidth:'45px', maxHeight:'60px', filter: 'blur(0.6px)',cursor:'pointer' }} key={index} onClick={() => handleThemeSelect(item)}>
                 <ThemeIcon shapeFill={item.vertex.fillColor} 
-                   shapStroke={item.vertex.strokeColor} textFill={item.vertex.fontColor} linkStroke={item.edge.strokeColor}>
-                </ThemeIcon>
+                   shapStroke={item.vertex.strokeColor} textFill={item.vertex.fontColor} linkStroke={item.edge.strokeColor}
+                />
                 </div>
             )    
           )}

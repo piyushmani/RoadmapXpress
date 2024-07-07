@@ -22,7 +22,17 @@ interface Props {
     resourceId: string | undefined
     open: boolean
     onClose: ()=>{}
+}
 
+interface Link {
+  title: string;
+  link: string;
+}
+
+interface ResourceData {
+  title: string;
+  description: string;
+  links: Link[];
 }
 
 export default function Resources(props: Props) {
@@ -35,16 +45,16 @@ export default function Resources(props: Props) {
         open:props.open
     })
 
-    const [resourceData, setResourceData] = useState({ title: undefined, description:undefined,
+    const [resourceData, setResourceData] = useState({ title: '', description:'',
         links: [],
         userLinks:[]
-    })
+    } as ResourceData)
 
     const setClose=()=>{
         setResource({...resource, open:true})
     }
 
-    const fetchResource = async (roadmap_id, resource_id)=> {
+    const fetchResource = async (roadmap_id:number, resource_id:string)=> {
       try {
         setLoading(true);
         setError(false);
@@ -67,7 +77,7 @@ export default function Resources(props: Props) {
     },[props])
 
 
-    return <Sheet open={resource.open} onOpenChange={()=>{setClose(); props.onClose(false)} } >
+    return <Sheet open={resource.open} onOpenChange={()=>{setClose(); props.onClose()} } >
       <SheetContent className="w-[450px] sm:w-[450px] sm:max-w-none">
         {loading ? 
           <>

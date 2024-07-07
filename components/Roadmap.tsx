@@ -1,6 +1,6 @@
 import { MxCell, roadmapData, RoadmapDetails } from '@/types/graph';
 import dynamic from 'next/dynamic'
- 
+
 const RoadMapViewer = dynamic(() => import('@/components/RoadMapViewer'), { ssr: false })
 
 interface Props {
@@ -12,18 +12,18 @@ export function Roadmap(props: Props) {
 
     const roadmapDetails = props.roadmapDetails;
     const roadmapGraph = props.roadmapData;
-    var allVertexCells : MxCell[] = [];
+    var allVertexCells: MxCell[] = [];
     var allCells = roadmapGraph.mxfile.diagram.mxGraphModel.root.mxCell;
-    var vertexCells = allCells.filter(cell => cell._attributes.vertex );
+    var vertexCells = allCells.filter(cell => cell._attributes.vertex);
     var objectCells = roadmapGraph.mxfile.diagram.mxGraphModel.root.object;
-    var edgeCells= allCells.filter(cell => cell._attributes.edge);
+    var edgeCells = allCells.filter(cell => cell._attributes.edge);
 
     objectCells.forEach(cell => {
         var actualCellObject = cell.mxCell;
         var actualCellAttributed = cell._attributes;
         var updatedCellObject = {
             ...actualCellObject,
-            _attributes : {...actualCellObject._attributes, ...actualCellAttributed, value: actualCellAttributed.label }
+            _attributes: { ...actualCellObject._attributes, ...actualCellAttributed, value: actualCellAttributed.label }
         }
         allVertexCells.push(updatedCellObject)
     });
@@ -45,18 +45,17 @@ export function Roadmap(props: Props) {
                 maxWidth: roadmapDetails.maxwidth,
                 maxHeight: roadmapDetails.maxheight,
                 overflow: 'hidden',
-                cursor : 'default',
+                cursor: 'default',
             }}>
                 <div id='graph-container' ></div>
                 <RoadMapViewer
                     roadmapId={roadmapDetails.id}
                     roadmapName={roadmapDetails.name}
                     vetexCells={allVertexCells}
-                    edgeCells={edgeCells} 
-                >
-                </RoadMapViewer>
+                    edgeCells={edgeCells}
+                />
             </div>
         </div>
     )
 
-  }
+}

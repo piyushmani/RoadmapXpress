@@ -9,6 +9,13 @@ import {
 
 export type Icon = LucideIcon
 
+interface ThemeIconProps {
+  shapeFill: string;
+  shapStroke: string;
+  textFill: string;
+  linkStroke: string;
+}
+
 export const Icons = {
   sun: SunMedium,
   Palette: Palette ,
@@ -32,7 +39,7 @@ export const Icons = {
   ),
 }
 
-export const ThemeIcon = ({ shapeFill, shapStroke, textFill, linkStroke }) => {
+export const ThemeIcon: React.FC<ThemeIconProps> = ({ shapeFill, shapStroke, textFill, linkStroke }) => {
   return (
     <svg
       style={{
@@ -96,7 +103,5 @@ export const ThemeIcon = ({ shapeFill, shapStroke, textFill, linkStroke }) => {
         <g></g>
       </g>
     </svg>
-
-
   );
 }

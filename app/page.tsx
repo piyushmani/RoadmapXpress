@@ -9,7 +9,7 @@ export default function IndexPage() {
   return (
     <>
       <section className="relative flex flex-col items-center justify-center py-12 bg-white bg-cover md:py-16 lg:py-24 min-w-screen tails-bg">
-        <div className="flex flex-col flex-col-reverse items-center justify-center p-10 mx-auto lg:flex-row lg:max-w-6xl lg:p-0">
+        <div className="flex flex-col-reverse items-center justify-center p-10 mx-auto lg:flex-row lg:max-w-6xl lg:p-0">
           <div className="container relative z-20 flex flex-col w-full px-5 pr-12 mb-16 text-2xl text-gray-700 lg:w-1/2 sm:px-0 md:px-10 sm:items-center lg:items-start lg:mb-0">
             <h1 className="relative z-20 font-sans text-4xl font-extrabold leading-none text-black sm:text-5xl xl:text-6xl sm:text-center lg:text-left">
               <span className="relative">
