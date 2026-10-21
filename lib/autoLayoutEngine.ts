@@ -3,18 +3,25 @@ import {
   RoadmapGraph,
   RoadmapNode,
   RoadmapEdge,
-} from '../types/roadmap';
+  RoadmapLayoutOverrides,
+  RoadmapThemeConfig,
+} from '@/types/roadmap';
+import { DEFAULT_ROADMAP_THEME } from '@/config/theme';
 
-// Splits a label into multiple lines if it exceeds maxCharsPerLine
-export function wrapTopicLabel(label: string, maxCharsPerLine: number): string[] {
-  if (label.length <= maxCharsPerLine) return [label];
+export function wrapTopicLabel(
+  label: string,
+  maxCharsPerLine: number
+): string[] {
+  const safeMax = Math.max(10, maxCharsPerLine);
+  if (label.length <= safeMax) return [label];
+
   const words = label.split(' ');
   const lines: string[] = [];
   let current = '';
 
   for (const word of words) {
     const candidate = current ? current + ' ' + word : word;
-    if (candidate.length > maxCharsPerLine && current) {
+    if (candidate.length > safeMax && current) {
       lines.push(current);
       current = word;
     } else {
@@ -25,9 +32,9 @@ export function wrapTopicLabel(label: string, maxCharsPerLine: number): string[]
   return lines;
 }
 
-function computeBoundingBox(nodes: RoadmapNode[], pad = 28) {
+export function computeBoundingBox(nodes: RoadmapNode[], pad = 44) {
   if (nodes.length === 0) {
-    return { minX: 0, minY: 0, width: 1200, height: 1800 };
+    return { minX: 0, minY: 0, width: 1360, height: 1800 };
   }
   let minX = Infinity;
   let minY = Infinity;
@@ -49,25 +56,73 @@ function computeBoundingBox(nodes: RoadmapNode[], pad = 28) {
   };
 }
 
+export function applyLayoutOverrides(
+  baseGraph: RoadmapGraph,
+  overrides?: RoadmapLayoutOverrides
+): RoadmapGraph {
+  if (!overrides) return baseGraph;
+
+  const removedSet = new Set(overrides.removedEdgeIds || []);
+
+  const updatedNodes = baseGraph.nodes.map((node) => {
+    const ov = overrides.nodeOffsets?.[node.id];
+    if (!ov) return node;
+    return {
+      ...node,
+      x: Math.round(node.x + (ov.dx || 0)),
+      y: Math.round(node.y + (ov.dy || 0)),
+      width: ov.width ?? node.width,
+      height: ov.height ?? node.height,
+    };
+  });
+
+  const baseEdges = baseGraph.edges
+    .filter((e) => !removedSet.has(e.id))
+    .map((edge) => {
+      const customPts = overrides.edgePoints?.[edge.id];
+      if (!customPts) return edge;
+      return { ...edge, points: customPts };
+    });
+
+  const allEdges = [...baseEdges, ...(overrides.customEdges || [])];
+  const bounds = computeBoundingBox(updatedNodes, 44);
+
+  return {
+    minX: bounds.minX,
+    minY: bounds.minY,
+    width: bounds.width,
+    height: bounds.height,
+    nodes: updatedNodes,
+    edges: allEdges,
+  };
+}
+
 export function buildRoadmapFromSchema(
   title: string,
-  stages: RoadmapStageSchema[]
+  stages: RoadmapStageSchema[],
+  overrides?: RoadmapLayoutOverrides,
+  theme: RoadmapThemeConfig = DEFAULT_ROADMAP_THEME
 ): RoadmapGraph {
   const nodes: RoadmapNode[] = [];
   const edges: RoadmapEdge[] = [];
 
-  const SPINE_X = 620;
-  const BRANCH_GAP = 42;
-  const SUB_GAP = 24;
-  const GAP = 10;
-  const PAD_X = 14;
-  const HEADER_H = 36;
-  const PAD_BOTTOM = 14;
-  const SECTION_V_GAP = 22;
+  const SPINE_X = 680;
+  const BRANCH_GAP = theme.canvas.spineBranchGap ?? 68;
+  const TOPIC_GAP = theme.canvas.topicGap ?? 14;
+  const SUBTOPIC_GAP = theme.canvas.subTopicGap ?? 12;
+  const PAD_X = theme.canvas.sectionPadding ?? 20;
+  const HEADER_H = 24;
+  const PAD_BOTTOM = Math.max(16, Math.round(PAD_X * 0.85));
+  const SECTION_V_GAP = theme.canvas.stageVerticalGap ?? 48;
+  const SUBSECTION_GAP = theme.canvas.subSectionGap ?? 30;
 
-  // Dual-track vertical cursors so Left and Right sides pack concurrently!
-  let leftY = 105;
-  let rightY = 105;
+  const topicFontPx = theme.nodes.topic.fontSize || 13.5;
+  const subtopicFontPx = theme.nodes.subtopic.fontSize || 12.5;
+  const charWidthTopic = topicFontPx * 0.58;
+  const charWidthSubtopic = subtopicFontPx * 0.57;
+
+  let leftY = 115;
+  let rightY = 115;
   let lastMilestoneY = 75;
 
   const titleId = 'roadmap-main-title';
@@ -76,20 +131,25 @@ export function buildRoadmapFromSchema(
     label: title,
     type: 'title',
     clickable: false,
-    x: SPINE_X - 130,
-    y: 28,
-    width: 284,
-    height: 36,
+    x: SPINE_X - 200,
+    y: 24,
+    width: 424,
+    height: 42,
   });
 
   let prevSpineId = titleId;
 
-  function placeMilestone(id: string, preferredY: number): number {
-    const milestoneY = Math.max(preferredY, lastMilestoneY + 34);
+  function placeMilestone(
+    id: string,
+    stageId: string,
+    preferredY: number
+  ): number {
+    const milestoneY = Math.max(preferredY, lastMilestoneY + 46);
     lastMilestoneY = milestoneY;
 
     nodes.push({
       id,
+      stageId,
       label: '',
       type: 'milestone',
       clickable: false,
@@ -112,24 +172,29 @@ export function buildRoadmapFromSchema(
   stages.forEach((stage) => {
     const milestoneId = 'milestone-' + stage.id;
     const isLeft = stage.side === 'left';
-    const trackY = isLeft ? leftY : rightY;
 
-    // 1. Standalone Pill Topic (CI/CD, WebSocket, Server Sent Events)
+    const otherTrackY = isLeft ? rightY : leftY;
+    let trackY = isLeft ? leftY : rightY;
+    if (trackY < otherTrackY - 220) {
+      trackY = otherTrackY - 140;
+    }
+
     if (stage.standaloneTopic && stage.topics && stage.topics.length > 0) {
       const raw = stage.topics[0];
       const label = typeof raw === 'string' ? raw : raw.label;
-      const boxW = Math.max(175, label.length * 8 + 32);
-      const boxH = 32;
+      const boxW = Math.max(210, Math.ceil(label.length * charWidthTopic) + 44);
+      const boxH = 38;
       const boxX = isLeft
         ? SPINE_X - BRANCH_GAP - boxW
         : SPINE_X + 24 + BRANCH_GAP;
 
-      const mY = placeMilestone(milestoneId, trackY + boxH / 2);
+      const mY = placeMilestone(milestoneId, stage.id, trackY + boxH / 2);
       const actualY = Math.max(trackY, mY - boxH / 2);
 
       const topicId = 'topic-' + stage.id;
       nodes.push({
         id: topicId,
+        stageId: stage.id,
         label,
         lines: [label],
         type: 'topic',
@@ -152,25 +217,35 @@ export function buildRoadmapFromSchema(
       return;
     }
 
-    // 2. Grouped Sub-Containers (NoSQL Databases)
     if (stage.groups && stage.groups.length > 0) {
       const cols = stage.columns || 3;
-      const groupW = 142;
-      const groupH = 106;
+      const groupW = 166;
+      const groupPad = 12;
+      const subItemH = 30;
+      const maxTopicsInGroup = Math.max(
+        ...stage.groups.map((g) => g.topics.length),
+        1
+      );
+      const groupH =
+        38 +
+        maxTopicsInGroup * subItemH +
+        Math.max(0, maxTopicsInGroup - 1) * SUBTOPIC_GAP +
+        14;
       const groupRows = Math.ceil(stage.groups.length / cols);
 
-      const secW = cols * groupW + (cols - 1) * GAP + PAD_X * 2;
+      const secW = cols * groupW + (cols - 1) * TOPIC_GAP + PAD_X * 2;
       const secH =
-        HEADER_H + groupRows * groupH + (groupRows - 1) * GAP + PAD_BOTTOM;
+        HEADER_H + groupRows * groupH + (groupRows - 1) * TOPIC_GAP + PAD_BOTTOM;
       const secX = isLeft
         ? SPINE_X - BRANCH_GAP - secW
         : SPINE_X + 24 + BRANCH_GAP;
 
-      placeMilestone(milestoneId, trackY + Math.min(70, secH / 2));
+      placeMilestone(milestoneId, stage.id, trackY + 42);
 
       const secId = 'sec-' + stage.id;
       nodes.push({
         id: secId,
+        stageId: stage.id,
         label: stage.title || '',
         type: 'section',
         clickable: false,
@@ -190,11 +265,14 @@ export function buildRoadmapFromSchema(
       stage.groups.forEach((grp, gIdx) => {
         const r = Math.floor(gIdx / cols);
         const c = gIdx % cols;
-        const gx = secX + PAD_X + c * (groupW + GAP);
-        const gy = trackY + HEADER_H + r * (groupH + GAP);
+        const gx = secX + PAD_X + c * (groupW + TOPIC_GAP);
+        const gy = trackY + HEADER_H + r * (groupH + TOPIC_GAP);
+        const grpId = 'subsec-' + grp.id;
 
         nodes.push({
-          id: 'subsec-' + grp.id,
+          id: grpId,
+          parentId: secId,
+          stageId: stage.id,
           label: grp.title,
           type: 'subsection',
           clickable: false,
@@ -207,14 +285,19 @@ export function buildRoadmapFromSchema(
         grp.topics.forEach((tLabel, tIdx) => {
           nodes.push({
             id: 'topic-' + grp.id + '-' + tIdx,
+            parentId: secId,
+            stageId: stage.id,
             label: tLabel,
-            lines: [tLabel],
-            type: 'topic',
+            lines: wrapTopicLabel(
+              tLabel,
+              Math.floor((groupW - groupPad * 2 - 14) / charWidthSubtopic)
+            ),
+            type: 'subtopic',
             clickable: true,
-            x: gx + 10,
-            y: gy + 32 + tIdx * 33,
-            width: groupW - 20,
-            height: 26,
+            x: gx + groupPad,
+            y: gy + 36 + tIdx * (subItemH + SUBTOPIC_GAP),
+            width: groupW - groupPad * 2,
+            height: subItemH,
           });
         });
       });
@@ -224,33 +307,20 @@ export function buildRoadmapFromSchema(
       return;
     }
 
-    // 3. Standard Section with Per-Row Heights & Adaptive Column Widths
     const topics = stage.topics || [];
-    const cols = stage.columns || 1;
-    const hasSideSub = stage.subSections && stage.subSections.length > 0;
+    const cols = stage.columns || 2;
 
-    // Choose column width so text fits cleanly while keeping subsections inside page bounds
-    const colW =
-      cols === 3
-        ? 126
-        : cols === 2
-          ? hasSideSub
-            ? 156
-            : 192
-          : hasSideSub
-            ? 175
-            : 215;
-
-    const maxChars = Math.floor((colW - 18) / 7.1);
+    const colW = cols === 3 ? 162 : cols === 2 ? 244 : 380;
+    const maxCharsPerLine = Math.floor((colW - 26) / charWidthTopic);
     const totalRows = Math.ceil(topics.length / cols);
 
-    // Precompute wrapped lines and exact height for every row
     const preparedTopics = topics.map((raw) => {
       const label = typeof raw === 'string' ? raw : raw.label;
       const subtext = typeof raw === 'string' ? undefined : raw.subtext;
-      const lines = wrapTopicLabel(label, maxChars);
-      const baseH = lines.length > 1 ? 20 + lines.length * 15 : 30;
-      const subH = subtext && subtext.length > 0 ? subtext.length * 15 + 8 : 0;
+      const lines = wrapTopicLabel(label, maxCharsPerLine);
+      const baseH = lines.length > 1 ? 22 + lines.length * 17 : 36;
+      const subH =
+        subtext && subtext.length > 0 ? subtext.length * 16 + 12 : 0;
       return {
         label,
         lines,
@@ -262,25 +332,25 @@ export function buildRoadmapFromSchema(
     const rowHeights: number[] = [];
     for (let r = 0; r < totalRows; r++) {
       const rowItems = preparedTopics.slice(r * cols, (r + 1) * cols);
-      const maxH = Math.max(...rowItems.map((it) => it.height), 30);
-      rowHeights.push(maxH);
+      rowHeights.push(Math.max(...rowItems.map((it) => it.height), 36));
     }
 
     const totalRowsHeight =
       rowHeights.reduce((acc, h) => acc + h, 0) +
-      Math.max(0, totalRows - 1) * GAP;
+      Math.max(0, totalRows - 1) * TOPIC_GAP;
 
-    const secW = cols * colW + (cols - 1) * GAP + PAD_X * 2;
+    const secW = cols * colW + (cols - 1) * TOPIC_GAP + PAD_X * 2;
     const secH = HEADER_H + totalRowsHeight + PAD_BOTTOM;
     const secX = isLeft
       ? SPINE_X - BRANCH_GAP - secW
       : SPINE_X + 24 + BRANCH_GAP;
 
-    placeMilestone(milestoneId, trackY + Math.min(65, secH / 2));
+    placeMilestone(milestoneId, stage.id, trackY + 42);
 
     const secId = 'sec-' + stage.id;
     nodes.push({
       id: secId,
+      stageId: stage.id,
       label: stage.title || '',
       type: 'section',
       clickable: false,
@@ -306,20 +376,26 @@ export function buildRoadmapFromSchema(
 
       rowItems.forEach((item, cIdx) => {
         const tIdx = r * cols + cIdx;
-        // If last row has fewer items than columns, span/center cleanly
         const isSingleTrailing = rowItems.length === 1 && cols > 1;
         const itemW = isSingleTrailing
-          ? cols * colW + (cols - 1) * GAP
+          ? cols * colW + (cols - 1) * TOPIC_GAP
           : colW;
         const tx = isSingleTrailing
           ? secX + PAD_X
-          : secX + PAD_X + cIdx * (colW + GAP);
+          : secX + PAD_X + cIdx * (colW + TOPIC_GAP);
 
         const tId = 'topic-' + stage.id + '-' + tIdx;
         nodes.push({
           id: tId,
+          parentId: secId,
+          stageId: stage.id,
           label: item.label,
-          lines: item.lines,
+          lines: isSingleTrailing
+            ? wrapTopicLabel(
+              item.label,
+              Math.floor((itemW - 26) / charWidthTopic)
+            )
+            : item.lines,
           subtext: item.subtext,
           type: 'topic',
           clickable: true,
@@ -332,36 +408,31 @@ export function buildRoadmapFromSchema(
         topicNodeByLabel.set(item.label, tId);
       });
 
-      cumulativeRowY += rowH + GAP;
+      cumulativeRowY += rowH + TOPIC_GAP;
     }
 
-    // 4. Render Attached Sub-Sections (Adaptive width + zero overflow)
-    let maxSectionBottom = trackY + secH;
+    let currentTrackCursor = trackY + secH;
+
     if (stage.subSections && stage.subSections.length > 0) {
-      let subCursorY = trackY;
-
       stage.subSections.forEach((sub) => {
-        const subCols = sub.columns || 1;
-        // Adaptive width based on longest topic inside the subsection
-        const longestSubChars = Math.max(
-          ...sub.topics.map((t) =>
-            (typeof t === 'string' ? t : t.label).length
-          ),
-          12
+        const subTopY = currentTrackCursor + SUBSECTION_GAP;
+        const subCols = sub.columns || 2;
+        const indent = 18;
+        const subW = secW - indent * 2;
+        const subX = secX + indent;
+        const subPadX = Math.max(14, PAD_X - 4);
+        const subColW = Math.floor(
+          (subW - subPadX * 2 - (subCols - 1) * SUBTOPIC_GAP) / subCols
         );
-        const subColW =
-          subCols === 2
-            ? Math.max(105, Math.min(135, longestSubChars * 7.2 + 20))
-            : Math.max(145, Math.min(205, longestSubChars * 7.4 + 24));
+        const subMaxChars = Math.floor((subColW - 22) / charWidthSubtopic);
 
-        const subMaxChars = Math.floor((subColW - 16) / 7.0);
         const subPrepared = sub.topics.map((raw) => {
           const sLabel = typeof raw === 'string' ? raw : raw.label;
           const sLines = wrapTopicLabel(sLabel, subMaxChars);
           return {
             label: sLabel,
             lines: sLines,
-            height: sLines.length > 1 ? 18 + sLines.length * 15 : 28,
+            height: sLines.length > 1 ? 20 + sLines.length * 16 : 32,
           };
         });
 
@@ -369,30 +440,24 @@ export function buildRoadmapFromSchema(
         const subRowHeights: number[] = [];
         for (let sr = 0; sr < subTotalRows; sr++) {
           const rItems = subPrepared.slice(sr * subCols, (sr + 1) * subCols);
-          subRowHeights.push(Math.max(...rItems.map((i) => i.height), 28));
+          subRowHeights.push(Math.max(...rItems.map((i) => i.height), 32));
         }
 
         const subRowsH =
           subRowHeights.reduce((a, b) => a + b, 0) +
-          Math.max(0, subTotalRows - 1) * 8;
-        const subHeaderH = sub.title ? 34 : 12;
-        const subW =
-          subCols * subColW + (subCols - 1) * 8 + PAD_X * 2;
-        const subH = subHeaderH + subRowsH + 12;
-
-        const subX =
-          sub.side === 'left'
-            ? secX - SUB_GAP - subW
-            : secX + secW + SUB_GAP;
+          Math.max(0, subTotalRows - 1) * SUBTOPIC_GAP;
+        const subHeaderH = sub.title ? 38 : 14;
+        const subH = subHeaderH + subRowsH + 16;
 
         const subSecId = 'subsec-' + sub.id;
         nodes.push({
           id: subSecId,
+          stageId: stage.id,
           label: sub.title || '',
           type: 'subsection',
           clickable: false,
           x: subX,
-          y: subCursorY,
+          y: subTopY,
           width: subW,
           height: subH,
         });
@@ -407,7 +472,7 @@ export function buildRoadmapFromSchema(
           type: 'sub-branch-edge',
         });
 
-        let subRowY = subCursorY + subHeaderH;
+        let subRowY = subTopY + subHeaderH;
         for (let sr = 0; sr < subTotalRows; sr++) {
           const rItems = subPrepared.slice(sr * subCols, (sr + 1) * subCols);
           const sRowH = subRowHeights[sr];
@@ -416,17 +481,19 @@ export function buildRoadmapFromSchema(
             const stIdx = sr * subCols + scIdx;
             const isTrailingSingle = rItems.length === 1 && subCols > 1;
             const sItemW = isTrailingSingle
-              ? subCols * subColW + (subCols - 1) * 8
+              ? subCols * subColW + (subCols - 1) * SUBTOPIC_GAP
               : subColW;
             const stX = isTrailingSingle
-              ? subX + PAD_X
-              : subX + PAD_X + scIdx * (subColW + 8);
+              ? subX + subPadX
+              : subX + subPadX + scIdx * (subColW + SUBTOPIC_GAP);
 
             nodes.push({
               id: 'topic-' + sub.id + '-' + stIdx,
+              parentId: subSecId,
+              stageId: stage.id,
               label: sItem.label,
               lines: sItem.lines,
-              type: 'topic',
+              type: 'subtopic',
               clickable: true,
               x: stX,
               y: subRowY,
@@ -435,30 +502,28 @@ export function buildRoadmapFromSchema(
             });
           });
 
-          subRowY += sRowH + 8;
+          subRowY += sRowH + SUBTOPIC_GAP;
         }
 
-        subCursorY += subH + 12;
-        maxSectionBottom = Math.max(maxSectionBottom, subCursorY - 12);
+        currentTrackCursor = subTopY + subH;
       });
     }
 
-    if (isLeft) leftY = maxSectionBottom + SECTION_V_GAP;
-    else rightY = maxSectionBottom + SECTION_V_GAP;
+    if (isLeft) leftY = currentTrackCursor + SECTION_V_GAP;
+    else rightY = currentTrackCursor + SECTION_V_GAP;
   });
 
-  // Footer Node below both tracks
-  const finalY = Math.max(leftY, rightY, lastMilestoneY + 40) + 10;
+  const finalY = Math.max(leftY, rightY, lastMilestoneY + 50) + 16;
   const footerId = 'roadmap-footer';
   nodes.push({
     id: footerId,
     label: 'Keep Learning :)',
     type: 'title',
     clickable: false,
-    x: SPINE_X - 100,
+    x: SPINE_X - 110,
     y: finalY,
-    width: 224,
-    height: 34,
+    width: 244,
+    height: 38,
   });
 
   edges.push({
@@ -468,9 +533,9 @@ export function buildRoadmapFromSchema(
     type: 'spine-edge',
   });
 
-  const bounds = computeBoundingBox(nodes, 28);
+  const bounds = computeBoundingBox(nodes, 44);
 
-  return {
+  const baseGraph: RoadmapGraph = {
     minX: bounds.minX,
     minY: bounds.minY,
     width: bounds.width,
@@ -478,4 +543,6 @@ export function buildRoadmapFromSchema(
     nodes,
     edges,
   };
+
+  return applyLayoutOverrides(baseGraph, overrides);
 }

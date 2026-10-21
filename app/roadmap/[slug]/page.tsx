@@ -1,38 +1,48 @@
+import React, { Suspense } from 'react';
 import { notFound } from 'next/navigation';
+import RoadmapPageClient from '@/components/roadmap/RoadmapPageClient';
+import { getHybridRoadmapData } from '@/lib/supabase/roadmaps';
 
-import { adminClient } from '@/lib/db';
-import { Roadmap } from '@/components/Roadmap';
-import bg from '../../../assets/bg_1.png'
-import { RoadmapDetails } from '@/types/graph';
+async function RoadmapDataLoader({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>;
+  searchParams?: Promise<{ v?: string }>;
+}) {
+  const { slug } = await params;
+  const sp = searchParams ? await searchParams : {};
+  const requestedVersion = sp.v ? parseInt(sp.v, 10) : undefined;
+  const data = await getHybridRoadmapData(slug, requestedVersion);
 
-export const revalidate = 5
+  if (!data) {
+    notFound();
+  }
 
-export default async function Page({ params, }: { params: { slug: string }; }) {
-
-    const getRoadmapDetails = async (slug: string) => {
-        const { data, error } = await adminClient.from('roadmaps')
-            .select().eq('slug', slug).single()
-        if (error) {
-            return notFound();
-        }
-        return data;
-    }
-
-    const getRoadmapJsonData = async (file: string) => {
-        const { data, error } = await adminClient.storage.from('roadmaps').download(file);
-        if (error) {
-            return notFound();
-        }
-        return JSON.parse(new TextDecoder("utf-8").decode(await data.arrayBuffer()));
-    }
-
-    const roadmapDetails: RoadmapDetails = await getRoadmapDetails(params.slug);
-    const roadmapJsonData = await getRoadmapJsonData(roadmapDetails.json_file);
-
-
-    return <div style={{backgroundImage: `url(${bg.src})`}}>
-        <Roadmap roadmapDetails={roadmapDetails} roadmapData={roadmapJsonData}></Roadmap>
-    </div>
-
+  return <RoadmapPageClient data={data} />;
 }
 
+export default function RoadmapPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>;
+  searchParams?: Promise<{ v?: string }>;
+}) {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-[70vh] w-full items-center justify-center">
+          <div className="flex flex-col items-center gap-3">
+            <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+            <p className="text-sm text-muted-foreground animate-pulse">
+              Loading roadmap...
+            </p>
+          </div>
+        </div>
+      }
+    >
+      <RoadmapDataLoader params={params} searchParams={searchParams} />
+    </Suspense>
+  );
+}

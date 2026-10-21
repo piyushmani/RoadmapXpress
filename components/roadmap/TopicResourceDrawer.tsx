@@ -1,9 +1,10 @@
 'use client';
 
 import React from 'react';
-import { RoadmapNode, TopicStatus } from '../types/roadmap';
+import { RoadmapNode, TopicStatus } from '@/types/roadmap';
 
 interface TopicResourceDrawerProps {
+  roadmapTitle: string;
   node: RoadmapNode | null;
   status: TopicStatus;
   onClose: () => void;
@@ -11,6 +12,7 @@ interface TopicResourceDrawerProps {
 }
 
 export default function TopicResourceDrawer({
+  roadmapTitle,
   node,
   status,
   onClose,
@@ -19,7 +21,7 @@ export default function TopicResourceDrawer({
   if (!node) return null;
 
   const encodedQuery = encodeURIComponent(
-    node.label + ' backend engineering guide'
+    node.label + ' ' + roadmapTitle + ' guide'
   );
 
   return (
@@ -28,7 +30,7 @@ export default function TopicResourceDrawer({
         <div>
           <div className="flex items-center justify-between pb-4 border-b border-slate-200">
             <span className="text-xs font-semibold uppercase tracking-wider text-blue-600 bg-blue-50 px-2.5 py-1 rounded-md">
-              Topic Details
+              {roadmapTitle}
             </span>
             <button
               onClick={onClose}
