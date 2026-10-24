@@ -2,12 +2,10 @@
 
 import React, { useMemo, useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { RoadmapHybridData, RoadmapSummaryItem } from '@/lib/supabase/types';
 import {
   RoadmapStageSchema,
   RoadmapLayoutOverrides,
-  RoadmapNode,
   RoadmapThemeConfig,
   SemanticEdgeType,
   RoadmapEdge,
@@ -15,8 +13,8 @@ import {
 } from '@/types/roadmap';
 import { buildRoadmapFromSchema } from '@/lib/autoLayoutEngine';
 import { DEFAULT_ROADMAP_THEME } from '@/config/theme';
-import RoadmapSvgCanvas from './RoadmapSvgCanvas';
-import RoadmapStructureEditor from './RoadmapStructureEditor';
+import SvgCanvas from './svg-canvas';
+import StructureEditor from './structure-editor';
 import { useAuth } from '@/components/auth/auth-provider';
 import { fetchRoadmapForEditor } from '@/app/roadmap/editor/actions';
 import {
@@ -29,26 +27,23 @@ import {
   ChevronUp,
   Sliders,
   MapPin,
-  ExternalLink,
   Compass,
   ArrowRight,
-  Layers,
 } from 'lucide-react';
 import { AuthModal } from '@/components/auth/auth-modal';
 
-interface RoadmapEditorPageClientProps {
+interface EditorPageProps {
   availableRoadmaps?: RoadmapSummaryItem[];
   initialData?: RoadmapHybridData | null;
   allVersions?: Array<{ version: number; is_latest: boolean; updated_at?: string }>;
 }
 
-export default function RoadmapEditorPageClient({
+export default function EditorPage({
   availableRoadmaps = [],
   initialData = null,
   allVersions = [],
-}: RoadmapEditorPageClientProps) {
-  const router = useRouter();
-  const { user, isAdmin, isLoading } = useAuth();
+}: EditorPageProps) {
+  const { isAdmin, isLoading } = useAuth();
   const [authModalOpen, setAuthModalOpen] = useState(false);
 
   const [currentRoadmapData, setCurrentRoadmapData] = useState<RoadmapHybridData | null>(
@@ -89,7 +84,7 @@ export default function RoadmapEditorPageClient({
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Dropdown Save Mode: 'new_version' (Save to DB) vs 'override_current' (Override Current)
+  // Dropdown Save Mode: 'new_version' vs 'override_current'
   const [saveMode, setSaveMode] = useState<'new_version' | 'override_current'>('new_version');
   const [isSaveMenuOpen, setIsSaveMenuOpen] = useState(false);
   const saveDropdownRef = useRef<HTMLDivElement>(null);
@@ -145,7 +140,7 @@ export default function RoadmapEditorPageClient({
     }
   };
 
-  // Check for auto-select from sessionStorage on mount (when clicked from a roadmap page)
+  // Check for auto-select from sessionStorage on mount
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const autoSelectSlug = sessionStorage.getItem('roadmapxpress_editor_auto_select');
@@ -169,7 +164,7 @@ export default function RoadmapEditorPageClient({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Compute graph in real-time as admin tweaks settings
+  // Compute graph in real-time as settings change
   const graph = useMemo(() => {
     if (!currentRoadmapData) {
       return { minX: 0, minY: 0, width: 800, height: 600, nodes: [], edges: [] };
@@ -202,7 +197,7 @@ export default function RoadmapEditorPageClient({
     );
   }, [stages, overrides, theme, currentRoadmapData]);
 
-  // Save to Database Handler (Supports both Save New Version & Override Current)
+  // Save to Database Handler
   const handleSave = async (overrideCurrent: boolean): Promise<string | null> => {
     if (!currentRoadmapData || !activeSlug) return null;
 
@@ -230,13 +225,11 @@ export default function RoadmapEditorPageClient({
       if (json.ok) {
         setCurrentVersion(json.version);
         if (!overrideCurrent) {
-          // Add newly created row version to versionsList
           setVersionsList((prev) => [
             { version: json.version, is_latest: true },
             ...prev.map((v) => ({ ...v, is_latest: false })),
           ]);
         }
-        // Update baseline data so hasUnsavedChanges becomes false
         setCurrentRoadmapData((prev) =>
           prev
             ? {
@@ -426,7 +419,7 @@ export default function RoadmapEditorPageClient({
     });
   };
 
-  // If Auth is still loading, show skeleton
+  // Auth Loading
   if (isLoading) {
     return (
       <div className="max-w-7xl mx-auto px-4 py-12 flex flex-col items-center justify-center space-y-4">
@@ -436,7 +429,7 @@ export default function RoadmapEditorPageClient({
     );
   }
 
-  // Access Denied if not admin
+  // Access Denied
   if (!isAdmin) {
     return (
       <div className="max-w-xl mx-auto px-4 py-16 text-center space-y-6">
@@ -470,18 +463,15 @@ export default function RoadmapEditorPageClient({
     );
   }
 
-  // Next version calculation for preview
   const nextIncrementedVersion = currentVersion + 1;
 
-  // Authorized Admin Workspace
   return (
     <main className="min-h-screen flex flex-col">
-      {/* 1. STICKY TOP GRAPH EDITOR HEADER & CONTROLS */}
+      {/* 1. Header & Controls */}
       <div className="sticky top-12 z-30 w-full bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 shadow-sm transition-all">
         <div className="max-w-7xl mx-auto px-4 py-3 space-y-2.5">
-          {/* Top Bar: Selector, Badges, Collapse Toggle, Save Split Button */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            {/* Left: Public Link & Roadmap Selector */}
+            {/* Left: Navigation & Roadmap Selector */}
             <div className="flex flex-wrap items-center gap-2.5">
               {activeSlug ? (
                 <Link
@@ -503,7 +493,7 @@ export default function RoadmapEditorPageClient({
                 </Link>
               )}
 
-              {/* ROADMAP SELECTOR MENU */}
+              {/* Roadmap Selector */}
               <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1 shadow-2xs">
                 <MapPin className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
                 <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider shrink-0 hidden md:inline">
@@ -530,7 +520,7 @@ export default function RoadmapEditorPageClient({
                 </select>
               </div>
 
-              {/* Badges & Version Selector */}
+              {/* Version & Status Badges */}
               {activeSlug && (
                 <div className="flex items-center gap-1.5">
                   <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
@@ -570,10 +560,9 @@ export default function RoadmapEditorPageClient({
               )}
             </div>
 
-            {/* Right: Controls Toggle, Status Msg & Save Split Button */}
+            {/* Right: Controls Toggle & Save Button */}
             {activeSlug && (
               <div className="flex items-center gap-2">
-                {/* Controls Collapse/Expand Toggle Button */}
                 <button
                   type="button"
                   onClick={() => setIsControlsCollapsed((prev) => !prev)}
@@ -589,16 +578,14 @@ export default function RoadmapEditorPageClient({
                   )}
                 </button>
 
-                {/* Save Status Notification */}
                 {saveStatus && (
                   <span className="text-xs font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 px-2.5 py-1 rounded-lg border border-emerald-200 dark:border-emerald-800 animate-in fade-in-0">
                     {saveStatus}
                   </span>
                 )}
 
-                {/* TWO-OPTION SAVE BUTTON WITH SPLIT DROPDOWN */}
+                {/* Split Save Button */}
                 <div className="relative inline-flex items-center rounded-lg shadow-xs" ref={saveDropdownRef}>
-                  {/* Main Action Button */}
                   <button
                     type="button"
                     onClick={() => handleSave(saveMode === 'override_current')}
@@ -608,11 +595,6 @@ export default function RoadmapEditorPageClient({
                         ? 'bg-amber-600 hover:bg-amber-700 text-white border-amber-700'
                         : 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-700'
                     } disabled:opacity-50 disabled:cursor-not-allowed`}
-                    title={
-                      saveMode === 'override_current'
-                        ? `Overwrites current v${currentVersion} in database without incrementing version`
-                        : `Saves roadmap to database as a new version (v${nextIncrementedVersion})`
-                    }
                   >
                     {isSaving ? (
                       <>
@@ -632,7 +614,6 @@ export default function RoadmapEditorPageClient({
                     )}
                   </button>
 
-                  {/* Dropdown Chevron Toggle Button */}
                   <button
                     type="button"
                     onClick={() => setIsSaveMenuOpen((prev) => !prev)}
@@ -651,14 +632,12 @@ export default function RoadmapEditorPageClient({
                     />
                   </button>
 
-                  {/* Save Options Dropdown Menu */}
                   {isSaveMenuOpen && (
                     <div className="absolute right-0 top-full mt-1.5 w-72 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl py-1.5 z-50 text-xs animate-in fade-in-0 zoom-in-95">
                       <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 border-b border-slate-100 dark:border-slate-800">
                         Save Database Mode
                       </div>
 
-                      {/* Option 1: Save to DB (New Version) */}
                       <button
                         type="button"
                         onClick={() => {
@@ -688,7 +667,6 @@ export default function RoadmapEditorPageClient({
                         )}
                       </button>
 
-                      {/* Option 2: Override Current */}
                       <button
                         type="button"
                         onClick={() => {
@@ -724,10 +702,10 @@ export default function RoadmapEditorPageClient({
             )}
           </div>
 
-          {/* STRUCTURE & THEME CONTROLS PANEL (COLLAPSIBLE) */}
+          {/* Controls Panel */}
           {activeSlug && currentRoadmapData && !isControlsCollapsed && (
             <div className="pt-1 animate-in fade-in-0 duration-150">
-              <RoadmapStructureEditor
+              <StructureEditor
                 slug={activeSlug}
                 canvasTitle={overrides.canvasTitle}
                 stages={stages}
@@ -757,7 +735,7 @@ export default function RoadmapEditorPageClient({
         </div>
       </div>
 
-      {/* 2. BODY CONTENT: ROADMAP CANVAS OR EMPTY SELECTION DASHBOARD */}
+      {/* 2. Body Content */}
       <div className="flex-1 w-full max-w-7xl mx-auto px-4 py-6">
         {isLoadingRoadmap ? (
           <div className="py-24 flex flex-col items-center justify-center space-y-3">
@@ -767,7 +745,6 @@ export default function RoadmapEditorPageClient({
             </p>
           </div>
         ) : !activeSlug || !currentRoadmapData ? (
-          /* EMPTY SELECTION STATE (When user visits editor directly without selecting a roadmap) */
           <div className="max-w-4xl mx-auto py-12 text-center space-y-8 animate-in fade-in-0 duration-200">
             <div className="space-y-3">
               <div className="w-16 h-16 rounded-2xl bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto shadow-sm">
@@ -781,7 +758,6 @@ export default function RoadmapEditorPageClient({
               </p>
             </div>
 
-            {/* Quick-Select Roadmap Cards Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-left">
               {availableRoadmaps.map((r) => (
                 <div
@@ -813,9 +789,8 @@ export default function RoadmapEditorPageClient({
             </div>
           </div>
         ) : (
-          /* ACTIVE GRAPH CANVAS */
           <div className="animate-in fade-in-0 duration-150">
-            <RoadmapSvgCanvas
+            <SvgCanvas
               graph={graph}
               theme={theme}
               moveGroupWithSection={moveGroupWithSection}

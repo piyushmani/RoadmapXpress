@@ -11,31 +11,29 @@ export interface TopicDrawerData {
   tag?: TopicRequirementTag;
 }
 
-interface TopicResourceDrawerProps {
+interface TopicDrawerProps {
   roadmapTitle: string;
   node: TopicDrawerData | null;
   status: TopicStatus;
   onClose: () => void;
-  onChangeStatus: (target: any, status: TopicStatus) => void;
+  onChangeStatus: (target: TopicDrawerData | string, status: TopicStatus) => void;
   onChangeRequirementTag?: (topicId: string, tag: TopicRequirementTag) => void;
 }
 
-export default function TopicResourceDrawer({
+export default function TopicDrawer({
   roadmapTitle,
   node,
   status,
   onClose,
   onChangeStatus,
   onChangeRequirementTag,
-}: TopicResourceDrawerProps) {
+}: TopicDrawerProps) {
   const [copiedId, setCopiedId] = useState(false);
 
   if (!node) return null;
 
   const topicSlugId = node.topicId || node.id;
-  const encodedQuery = encodeURIComponent(
-    node.label + ' ' + roadmapTitle + ' guide'
-  );
+  const encodedQuery = encodeURIComponent(`${node.label} ${roadmapTitle} guide`);
 
   const handleCopyId = () => {
     if (typeof navigator !== 'undefined' && navigator.clipboard) {
@@ -56,7 +54,7 @@ export default function TopicResourceDrawer({
       onClick={onClose}
     >
       <div
-        id={'drawer-' + topicSlugId}
+        id={`drawer-${topicSlugId}`}
         data-topic-id={topicSlugId}
         onClick={(e) => e.stopPropagation()}
         className="relative w-full max-w-md bg-white dark:bg-slate-900 h-full shadow-2xl p-6 flex flex-col justify-between overflow-y-auto border-l border-slate-200 dark:border-slate-800"
@@ -80,27 +78,15 @@ export default function TopicResourceDrawer({
             {node.label}
           </h2>
 
-          {/* Topic ID Badge & Copy ID Button */}
-          <div className="mt-2.5 flex items-center gap-2">
-            <span className="text-xs font-mono bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2.5 py-1 rounded border border-slate-200 dark:border-slate-700">
-              id: <strong>{topicSlugId}</strong>
-            </span>
-            <button
-              onClick={handleCopyId}
-              className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 transition-colors"
-            >
-              {copiedId ? '✓ Copied ID' : 'Copy ID'}
-            </button>
-          </div>
 
-          {/* Subtext Pills */}
+          {/* Subtext */}
           {node.subtext && node.subtext.length > 0 && (
             <div className="mt-3 p-3 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-sm text-slate-700 dark:text-slate-300 font-mono">
               {node.subtext.join(' · ')}
             </div>
           )}
 
-          {/* 3-State Learning Tracker Segmented Buttons */}
+          {/* 3-State Learning Tracker */}
           <div className="mt-6">
             <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
               Your Learning Status
@@ -109,43 +95,37 @@ export default function TopicResourceDrawer({
               <button
                 type="button"
                 onClick={() => setStatus('learning')}
-                className={
-                  'flex-1 py-2.5 px-3 text-xs font-bold flex items-center justify-center gap-1.5 border-r border-slate-200 dark:border-slate-700 transition-colors ' +
-                  (status === 'learning' || status === 'in-progress'
-                    ? 'bg-purple-100 dark:bg-purple-950/80 text-purple-900 dark:text-purple-200'
-                    : 'text-slate-800 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50')
-                }
+                className={`flex-1 py-2.5 px-3 text-xs font-bold flex items-center justify-center gap-1.5 border-r border-slate-200 dark:border-slate-700 transition-colors ${status === 'learning' || status === 'in-progress'
+                  ? 'bg-purple-100 dark:bg-purple-950/80 text-purple-900 dark:text-purple-200'
+                  : 'text-slate-800 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50'
+                  }`}
               >
                 <span className="text-purple-600 dark:text-purple-400">📖</span> Learning
               </button>
               <button
                 type="button"
                 onClick={() => setStatus('done')}
-                className={
-                  'flex-1 py-2.5 px-3 text-xs font-bold flex items-center justify-center gap-1.5 border-r border-slate-200 dark:border-slate-700 transition-colors ' +
-                  (status === 'done'
-                    ? 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-900 dark:text-emerald-200'
-                    : 'text-slate-800 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50')
-                }
+                className={`flex-1 py-2.5 px-3 text-xs font-bold flex items-center justify-center gap-1.5 border-r border-slate-200 dark:border-slate-700 transition-colors ${status === 'done'
+                  ? 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-900 dark:text-emerald-200'
+                  : 'text-slate-800 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50'
+                  }`}
               >
                 <span className="text-emerald-600 dark:text-emerald-400">✓</span> Done
               </button>
               <button
                 type="button"
                 onClick={() => setStatus('skipped')}
-                className={
-                  'flex-1 py-2.5 px-3 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors ' +
-                  (status === 'skipped'
-                    ? 'bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-slate-100'
-                    : 'text-slate-800 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50')
-                }
+                className={`flex-1 py-2.5 px-3 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors ${status === 'skipped'
+                  ? 'bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-slate-100'
+                  : 'text-slate-800 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50'
+                  }`}
               >
                 <span className="text-slate-500">✕</span> Skip
               </button>
             </div>
           </div>
 
-          {/* Optional Priority Tag Selector (e.g. In Editor mode or quick tag assignment) */}
+          {/* Priority Tag Selector */}
           {onChangeRequirementTag && (
             <div className="mt-6">
               <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
@@ -165,15 +145,11 @@ export default function TopicResourceDrawer({
                     <button
                       key={item.id}
                       type="button"
-                      onClick={() =>
-                        onChangeRequirementTag(topicSlugId, item.id)
-                      }
-                      className={
-                        'py-2 px-3 rounded-lg font-semibold border text-left transition-all ' +
-                        (active
-                          ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 border-slate-900 dark:border-white shadow-xs'
-                          : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50')
-                      }
+                      onClick={() => onChangeRequirementTag(topicSlugId, item.id)}
+                      className={`py-2 px-3 rounded-lg font-semibold border text-left transition-all ${active
+                        ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 border-slate-900 dark:border-white shadow-xs'
+                        : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50'
+                        }`}
                     >
                       {item.label}
                     </button>
@@ -191,10 +167,7 @@ export default function TopicResourceDrawer({
             <ul className="space-y-2.5 text-sm">
               <li>
                 <a
-                  href={
-                    'https://developer.mozilla.org/en-US/search?q=' +
-                    encodeURIComponent(node.label)
-                  }
+                  href={`https://developer.mozilla.org/en-US/search?q=${encodeURIComponent(node.label)}`}
                   target="_blank"
                   rel="noreferrer"
                   className="flex items-center justify-between p-3 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-blue-400 hover:bg-blue-50/40 dark:hover:bg-blue-950/20 transition-colors"
@@ -207,10 +180,7 @@ export default function TopicResourceDrawer({
               </li>
               <li>
                 <a
-                  href={
-                    'https://www.youtube.com/results?search_query=' +
-                    encodedQuery
-                  }
+                  href={`https://www.youtube.com/results?search_query=${encodedQuery}`}
                   target="_blank"
                   rel="noreferrer"
                   className="flex items-center justify-between p-3 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-blue-400 hover:bg-blue-50/40 dark:hover:bg-blue-950/20 transition-colors"
@@ -223,7 +193,7 @@ export default function TopicResourceDrawer({
               </li>
               <li>
                 <a
-                  href={'https://www.google.com/search?q=' + encodedQuery}
+                  href={`https://www.google.com/search?q=${encodedQuery}`}
                   target="_blank"
                   rel="noreferrer"
                   className="flex items-center justify-between p-3 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-blue-400 hover:bg-blue-50/40 dark:hover:bg-blue-950/20 transition-colors"
@@ -237,10 +207,6 @@ export default function TopicResourceDrawer({
             </ul>
           </div>
         </div>
-
-        <p className="text-xs text-slate-400 dark:text-slate-500 pt-6 border-t border-slate-100 dark:border-slate-800">
-          Topic ID: <code className="font-mono text-slate-600 dark:text-slate-400">#{topicSlugId}</code>
-        </p>
       </div>
     </div>
   );

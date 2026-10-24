@@ -5,6 +5,7 @@ import { buttonVariants } from "@/components/ui/button"
 import { Icons } from "@/components/icons"
 import { MainNav } from "@/components/main-nav";
 import { AuthButton } from "@/components/auth/auth-button";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 export function SiteHeader() {
   return (
@@ -13,6 +14,7 @@ export function SiteHeader() {
         <MainNav items={siteConfig.mainNav} />
         <div className="flex flex-1 items-center justify-end space-x-3">
           <AuthButton />
+          <ThemeToggle />
           <nav className="flex items-center space-x-1">
             <Link
               href={siteConfig.links.github}

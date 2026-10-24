@@ -1,11 +1,11 @@
 import React, { Suspense } from 'react';
-import RoadmapEditorPageClient from '@/components/roadmap/RoadmapEditorPageClient';
+import EditorPage from '@/components/roadmap/editor-page';
 import { getAllRoadmapsSummaryList } from '@/lib/supabase/roadmaps';
 
 async function RoadmapEditorDataLoader() {
   const allRoadmaps = await getAllRoadmapsSummaryList();
 
-  return <RoadmapEditorPageClient availableRoadmaps={allRoadmaps} />;
+  return <EditorPage availableRoadmaps={allRoadmaps} />;
 }
 
 export default function RoadmapEditorPage() {

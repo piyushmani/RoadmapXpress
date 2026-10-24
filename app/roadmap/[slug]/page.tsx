@@ -1,8 +1,43 @@
 import React, { Suspense } from 'react';
+import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import RoadmapSvgView from '@/components/roadmap/RoadmapSvgView';
-import RoadmapClientIsland from '@/components/roadmap/RoadmapClientIsland';
+import RoadmapViewer from '@/components/roadmap/roadmap-viewer';
 import { getRoadmapData } from '@/lib/supabase/roadmaps';
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
+  const { slug } = await params;
+  const data = await getRoadmapData(slug);
+
+  if (!data) {
+    return {
+      title: 'Roadmap Not Found',
+    };
+  }
+
+  const title = `${data.title} | RoadmapXpress`;
+  const description =
+    data.subtitle ||
+    `Interactive developer roadmap for ${data.title}. Step-by-step milestone path with curated free learning resources.`;
+
+  return {
+    title,
+    description,
+    openGraph: {
+      title,
+      description,
+      type: 'article',
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title,
+      description,
+    },
+  };
+}
 
 async function RoadmapDataLoader({
   params,
@@ -34,17 +69,14 @@ async function RoadmapDataLoader({
 
   return (
     <main className="max-w-7xl mx-auto px-4 py-6">
-      <RoadmapClientIsland
+      <RoadmapViewer
         slug={roadmapdata.slug}
         title={roadmapdata.title}
         totalTopics={totalTopics}
         subtitle={roadmapdata.subtitle}
-      >
-        <RoadmapSvgView
-          graph={roadmapdata.graph}
-          theme={roadmapdata.theme}
-        />
-      </RoadmapClientIsland>
+        graph={roadmapdata.graph}
+        initialTheme={roadmapdata.theme}
+      />
     </main>
   );
 }
