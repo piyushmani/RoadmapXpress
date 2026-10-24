@@ -1,17 +1,63 @@
+import fs from 'fs';
+import path from 'path';
 import { createServerClient } from '@supabase/ssr';
 import { createClient as createSupabaseJsClient, SupabaseClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import { DbRoadmapRecord, SaveRoadmapPayload, DEFAULT_LAYOUT_OVERRIDES } from './types';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const serverSecretKey =
-  process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
-const publishableKey =
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+let secretsLoaded = false;
+export function loadRenderSecrets() {
+  if (secretsLoaded) return;
+  secretsLoaded = true;
+  const secretDir = '/etc/secrets';
+  try {
+    if (fs.existsSync(secretDir)) {
+      const files = fs.readdirSync(secretDir);
+      for (const file of files) {
+        const fullPath = path.join(secretDir, file);
+        if (fs.statSync(fullPath).isFile()) {
+          const content = fs.readFileSync(fullPath, 'utf8');
+          content.split('\n').forEach((line) => {
+            const trimmed = line.trim();
+            if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
+              const eqIdx = trimmed.indexOf('=');
+              const key = trimmed.slice(0, eqIdx).trim();
+              const val = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, '');
+              if (key && !process.env[key]) {
+                process.env[key] = val;
+              }
+            }
+          });
+        }
+      }
+    }
+  } catch {}
+}
+
+export function getSupabaseUrl() {
+  loadRenderSecrets();
+  return process.env.NEXT_PUBLIC_SUPABASE_URL;
+}
+
+export function getServerSecretKey() {
+  loadRenderSecrets();
+  return (
+    process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY
+  );
+}
+
+export function getPublishableKey() {
+  loadRenderSecrets();
+  return (
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  );
+}
 
 export async function createClient() {
   const cookieStore = await cookies();
+  const supabaseUrl = getSupabaseUrl();
+  const publishableKey = getPublishableKey();
 
   if (!supabaseUrl || !publishableKey) {
     throw new Error(
@@ -40,6 +86,9 @@ let serverClientInstance: SupabaseClient | null = null;
 
 export function getSupabaseServerClient(): SupabaseClient | null {
   if (serverClientInstance) return serverClientInstance;
+  const supabaseUrl = getSupabaseUrl();
+  const serverSecretKey = getServerSecretKey();
+
   if (!supabaseUrl || !serverSecretKey) {
     return null;
   }

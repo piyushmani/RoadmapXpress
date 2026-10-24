@@ -1,7 +1,11 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { getSupabaseBrowserClient, isSupabaseConfigured } from '@/lib/supabase/client';
+import {
+  getSupabaseBrowserClient,
+  configureSupabaseBrowser,
+  isSupabaseConfigured,
+} from '@/lib/supabase/client';
 import { AuthUser } from '@/lib/supabase/types';
 
 interface AuthContextType {
@@ -46,14 +50,26 @@ function parseAuthUser(user: { id: string; email?: string | null; app_metadata?:
   };
 }
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export function AuthProvider({
+  children,
+  initialSupabaseUrl,
+  initialSupabaseKey,
+}: {
+  children: React.ReactNode;
+  initialSupabaseUrl?: string;
+  initialSupabaseKey?: string;
+}) {
+  if (initialSupabaseUrl && initialSupabaseKey) {
+    configureSupabaseBrowser(initialSupabaseUrl, initialSupabaseKey);
+  }
+
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const isConfigured = isSupabaseConfigured();
 
   useEffect(() => {
-    const supabase = getSupabaseBrowserClient();
+    const supabase = getSupabaseBrowserClient(initialSupabaseUrl, initialSupabaseKey);
     if (!supabase) {
       setIsLoading(false);
       return;
@@ -95,7 +111,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       authListener?.subscription.unsubscribe();
     };
-  }, []);
+  }, [initialSupabaseUrl, initialSupabaseKey]);
 
   const signInWithEmail = async (email: string, password: string) => {
     const supabase = getSupabaseBrowserClient();

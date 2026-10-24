@@ -205,8 +205,8 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
                   {loading
                     ? 'Processing...'
                     : mode === 'signin'
-                    ? 'Sign In with Supabase'
-                    : 'Create Supabase Account'}
+                      ? 'Sign In with Supabase'
+                      : 'Create Supabase Account'}
                 </button>
               </form>
 
@@ -221,11 +221,6 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
                   Open Full Page &rarr;
                 </Link>
               </div>
-              {!isConfigured && (
-                <p className="text-[11px] text-slate-400 text-center">
-                  Note: Add Supabase credentials in <code className="text-slate-600 font-mono">.env.local</code> to connect live authentication.
-                </p>
-              )}
             </>
           )}
         </div>
