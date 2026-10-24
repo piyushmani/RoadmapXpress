@@ -1,8 +1,7 @@
 'use server';
 
 import { requireAdmin } from '@/lib/auth';
-import { createClient } from '@/lib/supabase/server';
-import { supabaseAdmin } from '@/lib/supabase/admin';
+import { createClient, supabaseAdmin } from '@/lib/supabase/server';
 
 export async function updateSetting(id: string, value: string) {
   await requireAdmin();

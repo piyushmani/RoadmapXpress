@@ -11,6 +11,7 @@ import {
   NodeBoxStyle,
   EdgeLineStyle,
   EdgeCurveStyle,
+  TopicRequirementTag,
 } from '@/types/roadmap';
 import { THEME_PRESETS } from '@/config/theme';
 import {
@@ -28,17 +29,21 @@ import {
   ChevronRight,
   MapPin,
   Columns,
+  Tag,
 } from 'lucide-react';
 
 interface RoadmapStructureEditorProps {
   slug: string;
+  canvasTitle?: string;
   stages: RoadmapStageSchema[];
   graph: RoadmapGraph;
   theme: RoadmapThemeConfig;
   selectedNode: RoadmapNode | null;
   selectedEdge: RoadmapEdge | null;
   moveGroupWithSection: boolean;
+  topicTags?: Record<string, TopicRequirementTag>;
   onToggleMoveGroup: (val: boolean) => void;
+  onUpdateCanvasTitle?: (title: string) => void;
   onUpdateTheme: (nextTheme: RoadmapThemeConfig) => void;
   onUpdateStage: (
     stageId: string,
@@ -46,6 +51,7 @@ interface RoadmapStructureEditorProps {
   ) => void;
   onMoveStageOrder: (stageId: string, direction: 'up' | 'down') => void;
   onResizeSelectedNode: (nodeId: string, width: number, height: number) => void;
+  onUpdateTopicTag?: (topicId: string, tag: TopicRequirementTag) => void;
   onAddCustomEdge: (
     source: string,
     target: string,
@@ -53,12 +59,11 @@ interface RoadmapStructureEditorProps {
   ) => void;
   onDeleteEdge: (edgeId: string) => void;
   onChangeSelectedEdgePointCount: (edge: RoadmapEdge, delta: 1 | -1) => void;
-  onSaveNewVersionFile: (overrideCurrent?: boolean) => Promise<string | null>;
   onResetAllOverrides: () => void;
   onClose?: () => void;
 }
 
-type StudioTab = 'nodes' | 'edges' | 'canvas' | 'structure';
+type StudioTab = 'nodes' | 'edges' | 'canvas' | 'structure' | 'badges';
 type NodeCategoryKey = 'topic' | 'subtopic' | 'section' | 'subsection';
 type EdgeCategoryKey = 'spine' | 'branch' | 'subBranch';
 
@@ -108,24 +113,59 @@ function ColorPickerControl({
   label,
   value,
   onChange,
+  allowTransparent = false,
 }: {
   label: string;
   value: string;
   onChange: (val: string) => void;
+  allowTransparent?: boolean;
 }) {
+  const isTransparent = value.toLowerCase() === 'transparent';
+  // Ensure valid hex format for native color input
+  const colorInputValue =
+    isTransparent || !value.startsWith('#') || (value.length !== 7 && value.length !== 4)
+      ? '#ffffff'
+      : value;
+
   return (
-    <div className="space-y-1">
-      <span className="text-xs font-medium text-slate-700 block">{label}</span>
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-slate-700 block">{label}</span>
+        {allowTransparent && (
+          <button
+            type="button"
+            onClick={() => onChange(isTransparent ? '#ffffff' : 'transparent')}
+            className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border transition-all ${
+              isTransparent
+                ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            {isTransparent ? '✓ Transparent' : 'Transparent'}
+          </button>
+        )}
+      </div>
       <div className="flex items-center gap-2 px-2 py-1 bg-white border border-slate-200 rounded-lg shadow-xs hover:border-slate-300 transition-colors">
-        <input
-          type="color"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="h-6 w-6 rounded cursor-pointer border border-slate-300 p-0 bg-transparent"
-        />
+        {isTransparent ? (
+          <div
+            onClick={() => onChange('#ffffff')}
+            title="Click to pick solid color"
+            className="h-6 w-6 rounded cursor-pointer border border-slate-300 flex items-center justify-center shrink-0 bg-[linear-gradient(45deg,#cbd5e1_25%,transparent_25%),linear-gradient(-45deg,#cbd5e1_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#cbd5e1_75%),linear-gradient(-45deg,transparent_75%,#cbd5e1_75%)] [background-size:8px_8px] [background-position:0_0,0_4px,4px_-4px,-4px_0]"
+          />
+        ) : (
+          <input
+            type="color"
+            value={colorInputValue}
+            onChange={(e) => onChange(e.target.value)}
+            className="h-6 w-6 rounded cursor-pointer border border-slate-300 p-0 bg-transparent shrink-0"
+          />
+        )}
         <span className="text-xs font-mono font-medium text-slate-700 uppercase">
-          {value}
+          {isTransparent ? 'transparent' : value}
         </span>
+        {isTransparent && (
+          <span className="text-[10px] text-slate-400 italic ml-auto">No background</span>
+        )}
       </div>
     </div>
   );
@@ -133,21 +173,24 @@ function ColorPickerControl({
 
 export default function RoadmapStructureEditor({
   slug,
+  canvasTitle,
   stages,
   graph,
   theme,
   selectedNode,
   selectedEdge,
   moveGroupWithSection,
+  topicTags = {},
   onToggleMoveGroup,
+  onUpdateCanvasTitle,
   onUpdateTheme,
   onUpdateStage,
   onMoveStageOrder,
   onResizeSelectedNode,
+  onUpdateTopicTag,
   onAddCustomEdge,
   onDeleteEdge,
   onChangeSelectedEdgePointCount,
-  onSaveNewVersionFile,
   onResetAllOverrides,
   onClose,
 }: RoadmapStructureEditorProps) {
@@ -158,7 +201,18 @@ export default function RoadmapStructureEditor({
   const [edgeSource, setEdgeSource] = useState('');
   const [edgeTarget, setEdgeTarget] = useState('');
   const [edgeType, setEdgeType] = useState<SemanticEdgeType>('branch-edge');
-  const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [searchTopic, setSearchTopic] = useState('');
+
+  const filteredTopics = React.useMemo(() => {
+    const clickable = graph.nodes.filter((n) => n.clickable && n.label);
+    if (!searchTopic.trim()) return clickable;
+    const q = searchTopic.toLowerCase();
+    return clickable.filter(
+      (n) =>
+        n.label.toLowerCase().includes(q) ||
+        (n.topicId && n.topicId.toLowerCase().includes(q))
+    );
+  }, [graph.nodes, searchTopic]);
 
   const patchNodeCategory = (
     cat: NodeCategoryKey,
@@ -202,14 +256,6 @@ export default function RoadmapStructureEditor({
     });
   };
 
-  const handleSaveNewVersion = async () => {
-    const savedFile = await onSaveNewVersionFile();
-    if (savedFile) {
-      setStatusMsg('✓ Saved ' + savedFile);
-      setTimeout(() => setStatusMsg(null), 3500);
-    }
-  };
-
   const currentNodeStyle = theme.nodes[nodeCat];
   const currentEdgeStyle = theme.edges[edgeCat];
   const isContainerCat = nodeCat === 'section' || nodeCat === 'subsection';
@@ -222,10 +268,11 @@ export default function RoadmapStructureEditor({
         <div className="inline-flex p-1 bg-slate-200/70 rounded-xl gap-1">
           {(
             [
-              { id: 'nodes', label: 'Nodes & Markers', icon: Layers },
-              { id: 'edges', label: 'Edges & Routing', icon: Move },
-              { id: 'canvas', label: 'Spacing & Canvas', icon: Sliders },
-              { id: 'structure', label: 'Stages & Nodes', icon: Columns },
+              { id: 'nodes', label: 'Node Styling', icon: Layers },
+              { id: 'edges', label: 'Line Routing', icon: Move },
+              { id: 'canvas', label: 'Canvas & Spacing', icon: Sliders },
+              { id: 'structure', label: 'Stages & Layout', icon: Columns },
+              { id: 'badges', label: 'Topic Badges', icon: Tag },
             ] as const
           ).map((t) => {
             const IconComponent = t.icon;
@@ -250,23 +297,6 @@ export default function RoadmapStructureEditor({
 
         {/* Action Controls */}
         <div className="flex items-center gap-2">
-          <button
-            onClick={handleSaveNewVersion}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 shadow-xs transition-colors"
-            title="Saves roadmap directly to Supabase database as latest"
-          >
-            {statusMsg ? (
-              <>
-                <Check className="w-3.5 h-3.5" />
-                <span>{statusMsg}</span>
-              </>
-            ) : (
-              <>
-                <Save className="w-3.5 h-3.5" />
-                <span>Save to Database</span>
-              </>
-            )}
-          </button>
           <button
             onClick={onResetAllOverrides}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white text-rose-600 border border-rose-200 hover:bg-rose-50 shadow-xs transition-colors"
@@ -308,9 +338,9 @@ export default function RoadmapStructureEditor({
 
       {/* TAB CONTENT SCROLLABLE VIEWPORT */}
       <div className="max-h-[38vh] overflow-y-auto overscroll-contain">
-        {/* TAB 1: NODES & MARKERS */}
+        {/* TAB 1: NODE STYLING */}
       {activeTab === 'nodes' && (
-        <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-start">
+        <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
           {/* Node Category Selection */}
           <div className="p-3.5 rounded-xl bg-slate-50/80 border border-slate-200 space-y-2">
             <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
@@ -423,99 +453,12 @@ export default function RoadmapStructureEditor({
               onChange={(val) => patchNodeCategory(nodeCat, { strokeWidth: val })}
             />
           </div>
-
-          {/* Marker SVG Settings */}
-          <div className="p-3.5 rounded-xl bg-slate-50/80 border border-slate-200 space-y-3">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-              Milestone Pin Marker
-            </h4>
-            <div className="space-y-1">
-              <span className="text-xs font-medium text-slate-700 block">Shape</span>
-              <select
-                value={theme.nodes.milestone.shape}
-                onChange={(e) =>
-                  onUpdateTheme({
-                    ...theme,
-                    nodes: {
-                      ...theme.nodes,
-                      milestone: {
-                        ...theme.nodes.milestone,
-                        shape: e.target.value as 'pin' | 'circle',
-                      },
-                    },
-                  })
-                }
-                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-800 shadow-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-              >
-                <option value="pin">📍 Location Pin SVG</option>
-                <option value="circle">● Solid Dot Marker</option>
-              </select>
-            </div>
-
-            <ColorPickerControl
-              label="Marker Color"
-              value={theme.nodes.milestone.color}
-              onChange={(val) =>
-                onUpdateTheme({
-                  ...theme,
-                  nodes: {
-                    ...theme.nodes,
-                    milestone: {
-                      ...theme.nodes.milestone,
-                      color: val,
-                    },
-                  },
-                })
-              }
-            />
-
-            <RangeControl
-              label="Marker Size"
-              value={theme.nodes.milestone.size}
-              min={18}
-              max={44}
-              step={2}
-              onChange={(val) =>
-                onUpdateTheme({
-                  ...theme,
-                  nodes: {
-                    ...theme.nodes,
-                    milestone: {
-                      ...theme.nodes.milestone,
-                      size: val,
-                    },
-                  },
-                })
-              }
-            />
-
-            <label className="inline-flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-700 pt-1">
-              <input
-                type="checkbox"
-                checked={theme.nodes.milestone.showGroundShadow}
-                onChange={(e) =>
-                  onUpdateTheme({
-                    ...theme,
-                    nodes: {
-                      ...theme.nodes,
-                      milestone: {
-                        ...theme.nodes.milestone,
-                        showGroundShadow: e.target.checked,
-                      },
-                    },
-                  })
-                }
-                className="w-4 h-4 rounded text-blue-600 border-slate-300 focus:ring-blue-500"
-              />
-              <span>Show Ground Shadow Ring</span>
-            </label>
-          </div>
         </div>
       )}
 
-      {/* TAB 2: EDGES & ROUTING */}
+      {/* TAB 2: LINE ROUTING & MILESTONE PINS */}
       {activeTab === 'edges' && (
-        <div className="p-4 grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
+        <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-start">
           {/* Edge Category Selection */}
           <div className="p-3.5 rounded-xl bg-slate-50/80 border border-slate-200 space-y-2">
             <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
@@ -711,6 +654,93 @@ export default function RoadmapStructureEditor({
               </div>
             </div>
           </div>
+
+          {/* Marker SVG Settings (Spine Road Waypoints) */}
+          <div className="p-3.5 rounded-xl bg-slate-50/80 border border-slate-200 space-y-3">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+              Spine Milestone Pin Marker
+            </h4>
+            <div className="space-y-1">
+              <span className="text-xs font-medium text-slate-700 block">Pin Shape</span>
+              <select
+                value={theme.nodes.milestone.shape}
+                onChange={(e) =>
+                  onUpdateTheme({
+                    ...theme,
+                    nodes: {
+                      ...theme.nodes,
+                      milestone: {
+                        ...theme.nodes.milestone,
+                        shape: e.target.value as 'pin' | 'circle',
+                      },
+                    },
+                  })
+                }
+                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-800 shadow-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+              >
+                <option value="pin">📍 Location Pin SVG</option>
+                <option value="circle">● Solid Dot Marker</option>
+              </select>
+            </div>
+
+            <ColorPickerControl
+              label="Marker Color"
+              value={theme.nodes.milestone.color}
+              onChange={(val) =>
+                onUpdateTheme({
+                  ...theme,
+                  nodes: {
+                    ...theme.nodes,
+                    milestone: {
+                      ...theme.nodes.milestone,
+                      color: val,
+                    },
+                  },
+                })
+              }
+            />
+
+            <RangeControl
+              label="Marker Size"
+              value={theme.nodes.milestone.size}
+              min={18}
+              max={44}
+              step={2}
+              onChange={(val) =>
+                onUpdateTheme({
+                  ...theme,
+                  nodes: {
+                    ...theme.nodes,
+                    milestone: {
+                      ...theme.nodes.milestone,
+                      size: val,
+                    },
+                  },
+                })
+              }
+            />
+
+            <label className="inline-flex items-center gap-2 cursor-pointer text-xs font-medium text-slate-700 pt-1">
+              <input
+                type="checkbox"
+                checked={theme.nodes.milestone.showGroundShadow}
+                onChange={(e) =>
+                  onUpdateTheme({
+                    ...theme,
+                    nodes: {
+                      ...theme.nodes,
+                      milestone: {
+                        ...theme.nodes.milestone,
+                        showGroundShadow: e.target.checked,
+                      },
+                    },
+                  })
+                }
+                className="w-4 h-4 rounded text-blue-600 border-slate-300 focus:ring-blue-500"
+              />
+              <span>Show Ground Shadow Ring</span>
+            </label>
+          </div>
         </div>
       )}
 
@@ -725,7 +755,55 @@ export default function RoadmapStructureEditor({
               label="Canvas Background Color"
               value={theme.canvas.backgroundColor}
               onChange={(val) => patchCanvas({ backgroundColor: val })}
+              allowTransparent
             />
+            <div className="flex items-center gap-1.5 pt-0.5">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Presets:</span>
+              <button
+                type="button"
+                onClick={() => patchCanvas({ backgroundColor: 'transparent' })}
+                className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                  theme.canvas.backgroundColor === 'transparent'
+                    ? 'bg-blue-50 border-blue-400 text-blue-700 font-bold'
+                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                Transparent
+              </button>
+              <button
+                type="button"
+                onClick={() => patchCanvas({ backgroundColor: '#ffffff' })}
+                className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                  theme.canvas.backgroundColor.toLowerCase() === '#ffffff'
+                    ? 'bg-blue-50 border-blue-400 text-blue-700 font-bold'
+                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                White
+              </button>
+              <button
+                type="button"
+                onClick={() => patchCanvas({ backgroundColor: '#f8fafc' })}
+                className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                  theme.canvas.backgroundColor.toLowerCase() === '#f8fafc'
+                    ? 'bg-blue-50 border-blue-400 text-blue-700 font-bold'
+                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                Slate
+              </button>
+              <button
+                type="button"
+                onClick={() => patchCanvas({ backgroundColor: '#0f172a' })}
+                className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                  theme.canvas.backgroundColor.toLowerCase() === '#0f172a'
+                    ? 'bg-blue-50 border-blue-400 text-blue-700 font-bold'
+                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                Dark
+              </button>
+            </div>
             <div className="space-y-1">
               <span className="text-xs font-medium text-slate-700 block">
                 Global Font Family
@@ -744,6 +822,21 @@ export default function RoadmapStructureEditor({
                 </option>
                 <option value="Georgia, serif">Editorial Serif</option>
               </select>
+            </div>
+            <div className="space-y-1 pt-1 border-t border-slate-200/80">
+              <span className="text-xs font-medium text-slate-700 block">
+                Canvas Display Title
+              </span>
+              <input
+                type="text"
+                value={canvasTitle ?? ''}
+                placeholder="e.g. Backend (defaults to roadmap title)"
+                onChange={(e) => onUpdateCanvasTitle?.(e.target.value)}
+                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-xs text-slate-800 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+              />
+              <span className="text-[10px] text-slate-400 block">
+                Text on the canvas header. Falls back to roadmap title if blank.
+              </span>
             </div>
           </div>
 
@@ -809,7 +902,7 @@ export default function RoadmapStructureEditor({
         </div>
       )}
 
-      {/* TAB 4: STAGE & NODE STRUCTURE */}
+      {/* TAB 4: STAGES & LAYOUT */}
       {activeTab === 'structure' && (
         <div className="p-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="p-3.5 rounded-xl bg-slate-50/80 border border-slate-200 space-y-3">
@@ -873,6 +966,24 @@ export default function RoadmapStructureEditor({
                     />
                   </label>
                 </div>
+
+                {(selectedNode.id === 'roadmap-main-title' || selectedNode.type === 'title') && (
+                  <div className="pt-2 border-t border-slate-200">
+                    <label className="text-xs font-medium text-slate-700 block mb-1">
+                      Canvas Display Title
+                    </label>
+                    <input
+                      type="text"
+                      value={canvasTitle ?? ''}
+                      placeholder="e.g. Backend (defaults to roadmap title)"
+                      onChange={(e) => onUpdateCanvasTitle?.(e.target.value)}
+                      className="w-full px-2.5 py-1.5 border border-slate-200 rounded-lg bg-white text-xs text-slate-800 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                    />
+                    <span className="text-[10px] text-slate-400 block mt-1">
+                      Text displayed on this canvas title node.
+                    </span>
+                  </div>
+                )}
               </div>
             ) : (
               <p className="text-xs text-slate-500 bg-white p-3 rounded-xl border border-slate-200">
@@ -935,6 +1046,127 @@ export default function RoadmapStructureEditor({
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 5: TOPIC REQUIREMENT BADGES */}
+      {activeTab === 'badges' && (
+        <div className="p-4 grid grid-cols-1 lg:grid-cols-3 gap-4 text-xs">
+          <div className="p-3.5 rounded-xl bg-slate-50/80 border border-slate-200 space-y-3">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+              Selected Topic Badge
+            </h4>
+            {selectedNode && selectedNode.clickable ? (
+              <div className="space-y-3">
+                <div className="p-2.5 bg-white rounded-lg border border-slate-200">
+                  <div className="text-sm font-bold text-slate-900">
+                    {selectedNode.label}
+                  </div>
+                  <div className="font-mono text-[11px] text-blue-600 mt-0.5">
+                    id: #{selectedNode.topicId}
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {(
+                    [
+                      { id: 'required', label: '🟣 Required / Recommended' },
+                      { id: 'pick-any', label: '🟢 Pick Any / Alternative' },
+                      { id: 'optional', label: '⚪ Optional / Anytime' },
+                      { id: 'none', label: '✕ No Badge' },
+                    ] as const
+                  ).map((b) => {
+                    const active =
+                      ((topicTags && topicTags[selectedNode.topicId]) || selectedNode.tag || 'none') ===
+                      b.id;
+                    return (
+                      <button
+                        key={b.id}
+                        type="button"
+                        onClick={() =>
+                          onUpdateTopicTag?.(selectedNode.topicId, b.id)
+                        }
+                        className={
+                          'px-2.5 py-2 rounded-lg font-semibold border text-left transition-all ' +
+                          (active
+                            ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100')
+                        }
+                      >
+                        {b.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-slate-500 bg-white p-3 rounded-xl border border-slate-200 leading-relaxed">
+                Click any topic box on the canvas below to inspect and assign badges—or use the quick list on the right.
+              </p>
+            )}
+          </div>
+
+          <div className="lg:col-span-2 p-3.5 rounded-xl bg-slate-50/80 border border-slate-200 space-y-2.5">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                All Topics ({filteredTopics.length}) — Quick Requirement Tagging
+              </h4>
+              <input
+                type="text"
+                placeholder="Search topic or snake_case id..."
+                value={searchTopic}
+                onChange={(e) => setSearchTopic(e.target.value)}
+                className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-800 text-xs w-full sm:w-64 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              />
+            </div>
+
+            <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1">
+              {filteredTopics.map((tNode) => {
+                const curTag =
+                  (topicTags && topicTags[tNode.topicId]) || tNode.tag || 'none';
+                return (
+                  <div
+                    key={tNode.id}
+                    className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-white border border-slate-200 shadow-2xs"
+                  >
+                    <div className="min-w-0 flex-1 truncate">
+                      <span className="font-semibold text-slate-800">
+                        {tNode.label}
+                      </span>
+                      <span className="ml-2 font-mono text-[10px] text-slate-400">
+                        #{tNode.topicId}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {(
+                        [
+                          { id: 'required', label: '🟣 Required' },
+                          { id: 'pick-any', label: '🟢 Pick Any' },
+                          { id: 'optional', label: '⚪ Optional' },
+                          { id: 'none', label: 'None' },
+                        ] as const
+                      ).map((b) => (
+                        <button
+                          key={b.id}
+                          type="button"
+                          onClick={() =>
+                            onUpdateTopicTag?.(tNode.topicId, b.id)
+                          }
+                          className={
+                            'px-2 py-0.5 rounded text-[11px] font-semibold border transition-all ' +
+                            (curTag === b.id
+                              ? 'bg-slate-900 text-white border-slate-900'
+                              : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200')
+                          }
+                        >
+                          {b.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

@@ -1,33 +1,58 @@
 import React, { Suspense } from 'react';
 import { notFound } from 'next/navigation';
-import RoadmapPageClient from '@/components/roadmap/RoadmapPageClient';
-import { getHybridRoadmapData } from '@/lib/supabase/roadmaps';
+import RoadmapSvgView from '@/components/roadmap/RoadmapSvgView';
+import RoadmapClientIsland from '@/components/roadmap/RoadmapClientIsland';
+import { getRoadmapData } from '@/lib/supabase/roadmaps';
 
 async function RoadmapDataLoader({
   params,
-  searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams?: Promise<{ v?: string }>;
 }) {
   const { slug } = await params;
-  const sp = searchParams ? await searchParams : {};
-  const requestedVersion = sp.v ? parseInt(sp.v, 10) : undefined;
-  const data = await getHybridRoadmapData(slug, requestedVersion);
+  const data = await getRoadmapData(slug);
 
   if (!data) {
     notFound();
   }
 
-  return <RoadmapPageClient data={data} />;
+  const roadmapdata = {
+    slug: data.slug,
+    title: data.title,
+    subtitle: data.subtitle,
+    version: data.version,
+    tag: data.tag,
+    graph: data.graph,
+    theme: data.theme,
+  };
+
+  const totalTopics = new Set(
+    data.graph.nodes
+      .filter((n) => n.clickable && n.label)
+      .map((n) => n.topicId || n.label)
+  ).size;
+
+  return (
+    <main className="max-w-7xl mx-auto px-4 py-6">
+      <RoadmapClientIsland
+        slug={roadmapdata.slug}
+        title={roadmapdata.title}
+        totalTopics={totalTopics}
+        subtitle={roadmapdata.subtitle}
+      >
+        <RoadmapSvgView
+          graph={roadmapdata.graph}
+          theme={roadmapdata.theme}
+        />
+      </RoadmapClientIsland>
+    </main>
+  );
 }
 
 export default function RoadmapPage({
   params,
-  searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams?: Promise<{ v?: string }>;
 }) {
   return (
     <Suspense
@@ -42,7 +67,7 @@ export default function RoadmapPage({
         </div>
       }
     >
-      <RoadmapDataLoader params={params} searchParams={searchParams} />
+      <RoadmapDataLoader params={params} />
     </Suspense>
   );
 }

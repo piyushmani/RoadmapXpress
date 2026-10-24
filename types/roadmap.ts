@@ -13,7 +13,16 @@ export type SemanticEdgeType =
 
 export type EdgeCurveStyle = 'bezier' | 'orthogonal' | 'straight';
 
-export type TopicStatus = 'pending' | 'in-progress' | 'done' | 'skipped';
+export type TopicStatus = 'pending' | 'learning' | 'in-progress' | 'done' | 'skipped';
+
+export type TopicRequirementTag = 'none' | 'required' | 'pick-any' | 'optional';
+
+export function toTopicSlugId(label: string): string {
+  return (label || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
 
 export interface NodeBoxStyle {
   fillColor: string;
@@ -74,9 +83,11 @@ export interface RoadmapThemeConfig {
 
 export interface RoadmapNode {
   id: string;
+  topicId: string;
   label: string;
   lines?: string[];
   subtext?: string[];
+  tag?: TopicRequirementTag;
   type: SemanticNodeType;
   clickable: boolean;
   parentId?: string;
@@ -85,6 +96,20 @@ export interface RoadmapNode {
   y: number;
   width: number;
   height: number;
+  // Precomputed layout & render geometry (calculated by layout engine)
+  centerX?: number;
+  centerY?: number;
+  titleY?: number;
+  borderMask?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  renderedLines?: Array<{ text: string; y: number }>;
+  renderedSubtext?: Array<{ text: string; y: number }>;
+  badgeX?: number;
+  badgeY?: number;
 }
 
 export interface RoadmapEdge {
@@ -93,6 +118,7 @@ export interface RoadmapEdge {
   target: string;
   type: SemanticEdgeType;
   points?: Array<{ x: number; y: number }>;
+  d?: string;
 }
 
 export interface RoadmapGraph {
@@ -100,6 +126,7 @@ export interface RoadmapGraph {
   minY: number;
   width: number;
   height: number;
+  viewBox?: string;
   nodes: RoadmapNode[];
   edges: RoadmapEdge[];
 }
@@ -112,11 +139,21 @@ export interface NodePositionOverride {
 }
 
 export interface RoadmapLayoutOverrides {
+  canvasTitle?: string;
   nodeOffsets: Record<string, NodePositionOverride>;
   edgePoints: Record<string, Array<{ x: number; y: number }>>;
   customEdges: RoadmapEdge[];
   removedEdgeIds: string[];
+  topicTags?: Record<string, TopicRequirementTag>;
 }
+
+export type TopicItemSchema =
+  | string
+  | {
+      label: string;
+      subtext?: string[];
+      tag?: TopicRequirementTag;
+    };
 
 export interface RoadmapSubSectionSchema {
   id: string;
@@ -125,7 +162,7 @@ export interface RoadmapSubSectionSchema {
   side?: 'left' | 'right';
   placement?: 'bottom' | 'side';
   columns?: 1 | 2;
-  topics: Array<string | { label: string; subtext?: string[] }>;
+  topics: TopicItemSchema[];
 }
 
 export interface RoadmapStageSchema {
@@ -134,7 +171,7 @@ export interface RoadmapStageSchema {
   side: 'left' | 'right';
   standaloneTopic?: boolean;
   columns?: 1 | 2 | 3;
-  topics?: Array<string | { label: string; subtext?: string[] }>;
+  topics?: TopicItemSchema[];
   groups?: Array<{
     id: string;
     title: string;

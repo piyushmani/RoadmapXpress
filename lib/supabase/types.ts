@@ -5,6 +5,13 @@ import {
   RoadmapGraph,
 } from '@/types/roadmap';
 
+export const DEFAULT_LAYOUT_OVERRIDES: RoadmapLayoutOverrides = {
+  nodeOffsets: {},
+  edgePoints: {},
+  customEdges: [],
+  removedEdgeIds: [],
+};
+
 export interface DbRoadmapJson {
   stages: RoadmapStageSchema[];
   theme?: RoadmapThemeConfig;
@@ -55,7 +62,6 @@ export interface RoadmapHybridData {
   stages: RoadmapStageSchema[];
   theme: RoadmapThemeConfig;
   overrides: RoadmapLayoutOverrides;
-  isDbSource: boolean;
 }
 
 export interface AuthUser {

@@ -24,19 +24,26 @@ const AuthContext = createContext<AuthContextType>({
   signOut: async () => {},
 });
 
-function checkIsAdmin(email?: string | null, appMetadata?: Record<string, any> | null): boolean {
-  if (!email) return false;
-  if (appMetadata?.role === 'admin') return true;
-  const adminEmailsEnv =
-    process.env.NEXT_PUBLIC_ADMIN_EMAILS || 'admin@roadmapxpress.com,admin@example.com';
-  const allowed = adminEmailsEnv
-    .split(',')
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean);
-  return (
-    allowed.includes(email.toLowerCase()) ||
-    email.toLowerCase().startsWith('admin@')
-  );
+function checkIsAdmin(metadata?: Record<string, any> | null): boolean {
+  return metadata?.role === 'admin';
+}
+
+function parseAuthUser(user: { id: string; email?: string | null; app_metadata?: any; user_metadata?: any }): {
+  user: AuthUser;
+  isAdmin: boolean;
+} {
+  const email = user.email || '';
+  const isAdmin = checkIsAdmin(user.app_metadata || user.user_metadata);
+  const role: 'admin' | 'user' = isAdmin ? 'admin' : 'user';
+  const name =
+    user.user_metadata?.name ||
+    user.user_metadata?.full_name ||
+    email.split('@')[0];
+
+  return {
+    user: { id: user.id, email, role, name },
+    isAdmin,
+  };
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -57,17 +64,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .getSession()
       .then(({ data: { session } }) => {
         if (session?.user) {
-          const email = session.user.email || '';
-          const role = checkIsAdmin(email, session.user.app_metadata || session.user.user_metadata)
-            ? 'admin'
-            : 'user';
-          setUser({
-            id: session.user.id,
-            email,
-            role,
-            name: session.user.user_metadata?.name || session.user.user_metadata?.full_name || email.split('@')[0],
-          });
-          setIsAdmin(role === 'admin');
+          const { user: authUser, isAdmin: userIsAdmin } = parseAuthUser(session.user);
+          setUser(authUser);
+          setIsAdmin(userIsAdmin);
         } else {
           setUser(null);
           setIsAdmin(false);
@@ -83,17 +82,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data: authListener } = supabase.auth.onAuthStateChange(
       (_event, session) => {
         if (session?.user) {
-          const email = session.user.email || '';
-          const role = checkIsAdmin(email, session.user.app_metadata || session.user.user_metadata)
-            ? 'admin'
-            : 'user';
-          setUser({
-            id: session.user.id,
-            email,
-            role,
-            name: session.user.user_metadata?.name || session.user.user_metadata?.full_name || email.split('@')[0],
-          });
-          setIsAdmin(role === 'admin');
+          const { user: authUser, isAdmin: userIsAdmin } = parseAuthUser(session.user);
+          setUser(authUser);
+          setIsAdmin(userIsAdmin);
         } else {
           setUser(null);
           setIsAdmin(false);
@@ -130,15 +121,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (data.user) {
-      const uEmail = data.user.email || email;
-      const role = checkIsAdmin(uEmail, data.user.app_metadata || data.user.user_metadata) ? 'admin' : 'user';
-      setUser({
-        id: data.user.id,
-        email: uEmail,
-        role,
-        name: data.user.user_metadata?.name || data.user.user_metadata?.full_name || uEmail.split('@')[0],
-      });
-      setIsAdmin(role === 'admin');
+      const { user: authUser, isAdmin: userIsAdmin } = parseAuthUser(data.user);
+      setUser(authUser);
+      setIsAdmin(userIsAdmin);
     }
 
     return {};
@@ -172,15 +157,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Only set user if an active session is returned (e.g. if email confirmation is disabled)
     if (data.user && data.session) {
-      const uEmail = data.user.email || email;
-      const role = checkIsAdmin(uEmail, data.user.app_metadata || data.user.user_metadata) ? 'admin' : 'user';
-      setUser({
-        id: data.user.id,
-        email: uEmail,
-        role,
-        name: data.user.user_metadata?.name || data.user.user_metadata?.full_name || uEmail.split('@')[0],
-      });
-      setIsAdmin(role === 'admin');
+      const { user: authUser, isAdmin: userIsAdmin } = parseAuthUser(data.user);
+      setUser(authUser);
+      setIsAdmin(userIsAdmin);
     }
 
     return {};

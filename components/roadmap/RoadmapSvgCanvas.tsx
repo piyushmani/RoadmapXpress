@@ -6,21 +6,32 @@ import {
   RoadmapNode,
   RoadmapEdge,
   TopicStatus,
+  TopicRequirementTag,
   RoadmapThemeConfig,
   EdgeCurveStyle,
 } from '@/types/roadmap';
 import { DEFAULT_ROADMAP_THEME } from '@/config/theme';
+import {
+  REQUIREMENT_BADGE_COLORS,
+  STATUS_OVERRIDES,
+  DARK_STATUS_OVERRIDES,
+  getEdgeEndpoints,
+  resolveEdgeControlPoints,
+  buildSmoothSplineThroughPoints,
+  getEdgePath,
+  isDarkColor,
+} from '@/lib/svgEdgeUtils';
+
+export { resolveEdgeControlPoints };
 
 interface RoadmapSvgCanvasProps {
   graph: RoadmapGraph;
   theme?: RoadmapThemeConfig;
-  topicStatuses: Record<string, TopicStatus>;
+  topicStatuses?: Record<string, TopicStatus>;
   editMode?: boolean;
   moveGroupWithSection?: boolean;
   selectedNodeId?: string | null;
   selectedEdgeId?: string | null;
-  onSelectTopic: (node: RoadmapNode) => void;
-  onToggleTopicDone: (node: RoadmapNode) => void;
   onSelectEditNode?: (node: RoadmapNode) => void;
   onSelectEditEdge?: (edge: RoadmapEdge) => void;
   onMoveNodes?: (nodeIds: string[], dx: number, dy: number) => void;
@@ -31,192 +42,14 @@ interface RoadmapSvgCanvasProps {
   ) => void;
 }
 
-function getEdgeEndpoints(
-  edge: RoadmapEdge,
-  nodeMap: Map<string, RoadmapNode>
-) {
-  const source = nodeMap.get(edge.source);
-  const target = nodeMap.get(edge.target);
-  if (!source || !target) return null;
-
-  let sx = source.x + source.width / 2;
-  let sy = source.y + source.height / 2;
-  let tx = target.x + target.width / 2;
-  let ty = target.y + target.height / 2;
-
-  if (edge.type === 'branch-edge') {
-    if (target.x > sx) {
-      tx = target.x;
-      ty = Math.min(target.y + 42, target.y + target.height / 2);
-    } else if (target.x + target.width < sx) {
-      tx = target.x + target.width;
-      ty = Math.min(target.y + 42, target.y + target.height / 2);
-    }
-  } else if (edge.type === 'sub-branch-edge') {
-    sy = source.y + source.height;
-    ty = target.y;
-  }
-
-  return { sx, sy, tx, ty };
-}
-
-// Generates N evenly spaced default control points between source & target
-// or returns the user's custom dragged points
-export function resolveEdgeControlPoints(
-  edge: RoadmapEdge,
-  nodeMap: Map<string, RoadmapNode>,
-  desiredCount: number
-): Array<{ x: number; y: number }> {
-  const pts = getEdgeEndpoints(edge, nodeMap);
-  if (!pts) return [];
-  const { sx, sy, tx, ty } = pts;
-  const count = Math.max(1, Math.min(6, desiredCount || 2));
-
-  if (edge.points && edge.points.length === count) {
-    return edge.points;
-  }
-
-  // Create evenly spaced points along the natural curve between (sx,sy) and (tx,ty)
-  const result: Array<{ x: number; y: number }> = [];
-  for (let i = 1; i <= count; i++) {
-    const t = i / (count + 1);
-    // Add a subtle S-curve offset for multi-point branch edges
-    const curveOffset =
-      edge.type === 'branch-edge' && count >= 2
-        ? (t < 0.5 ? -1 : 1) * 10
-        : 0;
-    result.push({
-      x: Math.round(sx + (tx - sx) * t),
-      y: Math.round(sy + (ty - sy) * t + curveOffset),
-    });
-  }
-  return result;
-}
-
-// Smooth Catmull-Rom / Bezier spline through any number of control points
-function buildSmoothSplineThroughPoints(
-  allPts: Array<{ x: number; y: number }>
-): string {
-  if (allPts.length < 2) return '';
-  if (allPts.length === 2) {
-    return 'M ' + allPts[0].x + ' ' + allPts[0].y + ' L ' + allPts[1].x + ' ' + allPts[1].y;
-  }
-  if (allPts.length === 3) {
-    return (
-      'M ' +
-      allPts[0].x +
-      ' ' +
-      allPts[0].y +
-      ' Q ' +
-      allPts[1].x +
-      ' ' +
-      allPts[1].y +
-      ' ' +
-      allPts[2].x +
-      ' ' +
-      allPts[2].y
-    );
-  }
-
-  let d = 'M ' + allPts[0].x + ' ' + allPts[0].y;
-  for (let i = 0; i < allPts.length - 1; i++) {
-    const p0 = allPts[i === 0 ? 0 : i - 1];
-    const p1 = allPts[i];
-    const p2 = allPts[i + 1];
-    const p3 = allPts[i + 2 < allPts.length ? i + 2 : i + 1];
-
-    const cp1x = Math.round(p1.x + (p2.x - p0.x) / 6);
-    const cp1y = Math.round(p1.y + (p2.y - p0.y) / 6);
-    const cp2x = Math.round(p2.x - (p3.x - p1.x) / 6);
-    const cp2y = Math.round(p2.y - (p3.y - p1.y) / 6);
-
-    d += ' C ' + cp1x + ' ' + cp1y + ', ' + cp2x + ' ' + cp2y + ', ' + p2.x + ' ' + p2.y;
-  }
-  return d;
-}
-
-function getEdgePath(
-  edge: RoadmapEdge,
-  nodeMap: Map<string, RoadmapNode>,
-  curveStyle: EdgeCurveStyle,
-  controlPoints: Array<{ x: number; y: number }>
-): string {
-  const pts = getEdgeEndpoints(edge, nodeMap);
-  if (!pts) return '';
-  const { sx, sy, tx, ty } = pts;
-
-  const hasCustomDraggedPoints = Boolean(edge.points && edge.points.length > 0);
-  const fullChain = [{ x: sx, y: sy }, ...controlPoints, { x: tx, y: ty }];
-
-  if (curveStyle === 'straight') {
-    return fullChain
-      .map((p, idx) => (idx === 0 ? 'M ' : 'L ') + p.x + ' ' + p.y)
-      .join(' ');
-  }
-
-  if (curveStyle === 'orthogonal' && !hasCustomDraggedPoints) {
-    if (edge.type === 'sub-branch-edge') {
-      const midY = Math.round((sy + ty) / 2);
-      return (
-        'M ' + sx + ' ' + sy +
-        ' L ' + sx + ' ' + midY +
-        ' L ' + tx + ' ' + midY +
-        ' L ' + tx + ' ' + ty
-      );
-    }
-    const midX = Math.round((sx + tx) / 2);
-    return (
-      'M ' + sx + ' ' + sy +
-      ' L ' + midX + ' ' + sy +
-      ' L ' + midX + ' ' + ty +
-      ' L ' + tx + ' ' + ty
-    );
-  }
-
-  if (hasCustomDraggedPoints || controlPoints.length >= 2) {
-    return buildSmoothSplineThroughPoints(fullChain);
-  }
-
-  const midX = (sx + tx) / 2;
-  return (
-    'M ' + sx + ' ' + sy +
-    ' C ' + midX + ' ' + sy + ', ' + midX + ' ' + ty + ', ' + tx + ' ' + ty
-  );
-}
-
-const COMPLETED_OVERRIDES: Record<
-  Exclude<TopicStatus, 'pending'>,
-  { fill: string; stroke: string; text: string; badge?: string }
-> = {
-  'in-progress': {
-    fill: '#dbeafe',
-    stroke: '#2563eb',
-    text: '#1e3a8a',
-    badge: '●',
-  },
-  done: {
-    fill: '#dcfce7',
-    stroke: '#16a34a',
-    text: '#14532d',
-    badge: '✓',
-  },
-  skipped: {
-    fill: '#f1f5f9',
-    stroke: '#94a3b8',
-    text: '#64748b',
-  },
-};
-
 export default function RoadmapSvgCanvas({
   graph,
   theme = DEFAULT_ROADMAP_THEME,
-  topicStatuses,
-  editMode = false,
+  topicStatuses = {},
+  editMode = true,
   moveGroupWithSection = true,
   selectedNodeId,
   selectedEdgeId,
-  onSelectTopic,
-  onToggleTopicDone,
   onSelectEditNode,
   onSelectEditEdge,
   onMoveNodes,
@@ -373,6 +206,9 @@ export default function RoadmapSvgCanvas({
     );
   }, [graph.nodes]);
 
+  const isTransparentBg = theme.canvas.backgroundColor === 'transparent';
+  const canvasContrastColor = isTransparentBg ? '#ffffff' : theme.canvas.backgroundColor;
+
   return (
     <div
       style={{
@@ -381,6 +217,9 @@ export default function RoadmapSvgCanvas({
       }}
       className={
         'w-full overflow-x-auto rounded-2xl border shadow-xs p-3 md:p-6 transition-colors ' +
+        (isTransparentBg && editMode
+          ? 'bg-[linear-gradient(45deg,#f1f5f9_25%,transparent_25%),linear-gradient(-45deg,#f1f5f9_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#f1f5f9_75%),linear-gradient(-45deg,transparent_75%,#f1f5f9_75%)] [background-size:16px_16px] [background-position:0_0,0_8px,8px_-8px,-8px_0] '
+          : '') +
         (editMode ? 'border-amber-400 ring-2 ring-amber-200/60' : 'border-slate-200')
       }
     >
@@ -430,10 +269,10 @@ export default function RoadmapSvgCanvas({
             const isDragging = draggedSet.has(rawNode.id);
             const node = isDragging
               ? {
-                  ...rawNode,
-                  x: rawNode.x + (dragState?.dx || 0),
-                  y: rawNode.y + (dragState?.dy || 0),
-                }
+                ...rawNode,
+                x: rawNode.x + (dragState?.dx || 0),
+                y: rawNode.y + (dragState?.dy || 0),
+              }
               : rawNode;
 
             const isSub = node.type === 'subsection';
@@ -478,7 +317,7 @@ export default function RoadmapSvgCanvas({
                     fill={
                       isSub
                         ? theme.nodes.section.fillColor
-                        : theme.canvas.backgroundColor
+                        : canvasContrastColor
                     }
                   />
                 )}
@@ -539,7 +378,7 @@ export default function RoadmapSvgCanvas({
                   <path
                     d={d}
                     fill="none"
-                    stroke={theme.canvas.backgroundColor}
+                    stroke={canvasContrastColor}
                     strokeWidth={Math.max(1.8, edgeCfg.strokeWidth * 0.18)}
                     strokeDasharray="7 7"
                     strokeLinecap="round"
@@ -595,10 +434,10 @@ export default function RoadmapSvgCanvas({
             const isDragging = draggedSet.has(rawNode.id);
             const node = isDragging
               ? {
-                  ...rawNode,
-                  x: rawNode.x + (dragState?.dx || 0),
-                  y: rawNode.y + (dragState?.dy || 0),
-                }
+                ...rawNode,
+                x: rawNode.x + (dragState?.dx || 0),
+                y: rawNode.y + (dragState?.dy || 0),
+              }
               : rawNode;
 
             const isSelected = editMode && selectedNodeId === node.id;
@@ -640,7 +479,7 @@ export default function RoadmapSvgCanvas({
                       cx={0}
                       cy={-21}
                       r={4.8}
-                      fill={theme.canvas.backgroundColor}
+                      fill={canvasContrastColor}
                     />
                   </g>
                 );
@@ -657,14 +496,14 @@ export default function RoadmapSvgCanvas({
                     cy={cy}
                     r={Math.round((mStyle.size || 24) * 0.42)}
                     fill={pinColor}
-                    stroke={theme.canvas.backgroundColor}
+                    stroke={canvasContrastColor}
                     strokeWidth={3.5}
                   />
                   <circle
                     cx={cx}
                     cy={cy}
                     r={Math.max(3, Math.round((mStyle.size || 24) * 0.15))}
-                    fill={theme.canvas.backgroundColor}
+                    fill={canvasContrastColor}
                   />
                 </g>
               );
@@ -693,14 +532,20 @@ export default function RoadmapSvgCanvas({
             }
 
             // Topic or Subtopic Node
-            const status = topicStatuses[node.label] || 'pending';
+            const status =
+              topicStatuses[node.topicId] ||
+              topicStatuses[node.label] ||
+              'pending';
             const isSubtopic = node.type === 'subtopic';
             const baseBoxStyle = isSubtopic
               ? theme.nodes.subtopic
               : theme.nodes.topic;
 
+            const isDark = isDarkColor(theme.canvas.backgroundColor);
             const statusOverride =
-              status !== 'pending' ? COMPLETED_OVERRIDES[status] : null;
+              status !== 'pending'
+                ? (isDark ? DARK_STATUS_OVERRIDES : STATUS_OVERRIDES)[status]
+                : null;
 
             const fillColor = statusOverride
               ? statusOverride.fill
@@ -725,25 +570,18 @@ export default function RoadmapSvgCanvas({
               ? node.y + 18
               : node.y + node.height / 2 - titleBlockHeight / 2;
 
+            const reqTag = node.tag && node.tag !== 'none' ? node.tag : null;
+            const badgeCfg = reqTag ? REQUIREMENT_BADGE_COLORS[reqTag] : null;
+
             return (
               <g
                 key={node.id}
+                id={node.topicId}
                 data-node-id={node.id}
+                data-topic-id={node.topicId}
                 data-status={status}
                 onPointerDown={(e) => handleNodePointerDown(e, rawNode)}
-                onClick={() => {
-                  if (!editMode && node.clickable) onSelectTopic(node);
-                }}
-                onContextMenu={(e) => {
-                  if (editMode || !node.clickable) return;
-                  e.preventDefault();
-                  onToggleTopicDone(node);
-                }}
-                className={
-                  editMode
-                    ? 'cursor-move'
-                    : 'cursor-pointer transition-opacity hover:opacity-90'
-                }
+                className="cursor-move"
               >
                 <rect
                   x={node.x}
@@ -799,6 +637,37 @@ export default function RoadmapSvgCanvas({
                     {subLine}
                   </text>
                 ))}
+
+                {/* Requirement Badge: Required 🟣, Pick-Any 🟢, Optional ⚪ */}
+                {badgeCfg && (
+                  <g
+                    transform={
+                      'translate(' +
+                      (node.x + node.width - 6) +
+                      ', ' +
+                      (node.y + 6) +
+                      ')'
+                    }
+                  >
+                    <circle
+                      cx={0}
+                      cy={0}
+                      r={8.5}
+                      fill={badgeCfg.bg}
+                      stroke={canvasContrastColor}
+                      strokeWidth={1.5}
+                    />
+                    <path
+                      d="M -3.5 0.2 L -1 2.8 L 3.8 -2.5"
+                      fill="none"
+                      stroke="#ffffff"
+                      strokeWidth={1.8}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    <title>{badgeCfg.title}</title>
+                  </g>
+                )}
               </g>
             );
           })}

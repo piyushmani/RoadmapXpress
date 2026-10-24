@@ -1,39 +1,25 @@
 import { cacheLife, cacheTag } from 'next/cache';
 import { DEFAULT_ROADMAP_THEME } from '@/config/theme';
 import { buildRoadmapFromSchema } from '@/lib/autoLayoutEngine';
-import { getLatestRoadmapFromDb, getAllRoadmapsSummary, getAllVersionsForSlug } from './server';
-import { RoadmapHybridData, RoadmapSummaryItem } from './types';
+import {
+  getLatestRoadmapFromDb,
+  getRoadmapByVersionFromDb,
+  getAllRoadmapsSummary,
+  getAllVersionsForSlug,
+} from './server';
+import {
+  RoadmapHybridData,
+  RoadmapSummaryItem,
+  DbRoadmapRecord,
+  DEFAULT_LAYOUT_OVERRIDES,
+} from './types';
 import {
   RoadmapStageSchema,
   RoadmapLayoutOverrides,
   RoadmapThemeConfig,
 } from '@/types/roadmap';
 
-const EMPTY_OVERRIDES: RoadmapLayoutOverrides = {
-  nodeOffsets: {},
-  edgePoints: {},
-  customEdges: [],
-  removedEdgeIds: [],
-};
-
-/**
- * Loads the roadmap solely from the database with Next.js 16 Cache Components.
- * Cached across requests, taggable, and on-demand revalidatable.
- */
-export async function getHybridRoadmapData(
-  slug: string,
-  version?: number
-): Promise<RoadmapHybridData | null> {
-  'use cache';
-  cacheLife('minutes');
-  cacheTag(`roadmap-${slug}`, `roadmap-${slug}-${version || 'latest'}`, 'roadmaps');
-
-  const dbRecord = await getLatestRoadmapFromDb(slug, version);
-
-  if (!dbRecord) {
-    return null;
-  }
-
+function formatRoadmapData(dbRecord: DbRoadmapRecord): RoadmapHybridData {
   const rawJson = dbRecord.json || {};
   const stages: RoadmapStageSchema[] = rawJson.stages || [];
   const theme: RoadmapThemeConfig = {
@@ -44,10 +30,15 @@ export async function getHybridRoadmapData(
     canvas: { ...DEFAULT_ROADMAP_THEME.canvas, ...(rawJson.theme?.canvas || {}) },
   };
 
-  const overrides: RoadmapLayoutOverrides =
-    rawJson.overrides || EMPTY_OVERRIDES;
+  const rawOverrides = rawJson.overrides || DEFAULT_LAYOUT_OVERRIDES;
+  const defaultCanvasTitle = dbRecord.slug === 'backend' ? 'Backend' : undefined;
+  const canvasTitle = rawOverrides.canvasTitle || rawJson.canvasTitle || defaultCanvasTitle;
 
-  // Pre-calculate SVG layout on server from the database record
+  const overrides: RoadmapLayoutOverrides = {
+    ...rawOverrides,
+    ...(canvasTitle ? { canvasTitle } : {}),
+  };
+
   const graph = buildRoadmapFromSchema(dbRecord.title, stages, overrides, theme);
 
   return {
@@ -60,13 +51,47 @@ export async function getHybridRoadmapData(
     stages,
     theme,
     overrides,
-    isDbSource: true,
   };
 }
 
 /**
- * Returns a cached list of roadmap summaries (slug, title, version) for navigation/selector.
+ * Loads published roadmap (viewer strictly sees is_latest: true).
  */
+export async function getRoadmapData(
+  slug: string
+): Promise<RoadmapHybridData | null> {
+  'use cache';
+  cacheLife('minutes');
+  cacheTag(`roadmap-${slug}`, 'roadmaps');
+
+  const dbRecord = await getLatestRoadmapFromDb(slug);
+  if (!dbRecord) {
+    return null;
+  }
+
+  return formatRoadmapData(dbRecord);
+}
+
+/**
+ * Loads a specific version of a roadmap (editor can inspect/restore older versions).
+ */
+export async function getRoadmapByVersion(
+  slug: string,
+  version: number
+): Promise<RoadmapHybridData | null> {
+  'use cache';
+  cacheLife('minutes');
+  cacheTag(`roadmap-${slug}-v${version}`, 'roadmaps');
+
+  const dbRecord = await getRoadmapByVersionFromDb(slug, version);
+  if (!dbRecord) {
+    return null;
+  }
+
+  return formatRoadmapData(dbRecord);
+}
+
+
 export async function getAllRoadmapsSummaryList(): Promise<RoadmapSummaryItem[]> {
   'use cache';
   cacheLife('minutes');
@@ -75,9 +100,6 @@ export async function getAllRoadmapsSummaryList(): Promise<RoadmapSummaryItem[]>
   return getAllRoadmapsSummary();
 }
 
-/**
- * Returns a cached list of all available versions for a roadmap slug.
- */
 export async function getAllVersionsForSlugList(
   slug: string
 ): Promise<Array<{ version: number; is_latest: boolean; updated_at?: string }>> {

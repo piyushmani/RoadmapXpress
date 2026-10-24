@@ -1,34 +1,18 @@
 import { createServerClient } from '@supabase/ssr';
 import { createClient as createSupabaseJsClient, SupabaseClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
-import { DbRoadmapRecord, SaveRoadmapPayload } from './types';
+import { DbRoadmapRecord, SaveRoadmapPayload, DEFAULT_LAYOUT_OVERRIDES } from './types';
 
-const supabaseUrl =
-  process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const serverSecretKey = process.env.SUPABASE_SECRET_KEY;
+const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
-// Secret key for privileged server operations (reading/upserting roadmaps bypassing RLS)
-const serverSecretKey =
-  process.env.SUPABASE_SECRET_KEY ||
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.SUPABASE_KEY ||
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-// Publishable key for user-session context
-const publishableKey =
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-/**
- * Standard user-session server client using cookies (respects user session & RLS).
- * Used in Server Actions, route handlers, and protected user pages.
- */
 export async function createClient() {
   const cookieStore = await cookies();
 
   if (!supabaseUrl || !publishableKey) {
     throw new Error(
-      'Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY (or NEXT_PUBLIC_SUPABASE_ANON_KEY)'
+      'Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY'
     );
   }
 
@@ -43,141 +27,153 @@ export async function createClient() {
             cookieStore.set(name, value, options)
           );
         } catch {
-          // The `setAll` method was called from a Server Component.
-          // This can be ignored if proxy.ts is handling session refresh.
         }
       },
     },
   });
 }
 
-/**
- * Privileged server client (using secret/service_role key) for backend DB operations.
- */
+let serverClientInstance: SupabaseClient | null = null;
+
 export function getSupabaseServerClient(): SupabaseClient | null {
+  if (serverClientInstance) return serverClientInstance;
   if (!supabaseUrl || !serverSecretKey) {
     return null;
   }
 
   try {
-    return createSupabaseJsClient(supabaseUrl, serverSecretKey, {
+    serverClientInstance = createSupabaseJsClient(supabaseUrl, serverSecretKey, {
       auth: {
         persistSession: false,
         autoRefreshToken: false,
       },
     });
+    return serverClientInstance;
   } catch (e) {
     console.warn('Failed to initialize server Supabase client:', e);
     return null;
   }
 }
 
-export function isAdminEmail(email?: string | null): boolean {
-  if (!email) return false;
-  const adminEmailsEnv =
-    process.env.ADMIN_EMAILS ||
-    process.env.NEXT_PUBLIC_ADMIN_EMAILS ||
-    'admin@roadmapxpress.com,admin@example.com';
-  const allowed = adminEmailsEnv
-    .split(',')
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean);
+export const supabaseAdmin = new Proxy({} as SupabaseClient, {
+  get(_target, prop) {
+    const client = getSupabaseServerClient();
+    if (!client) {
+      throw new Error(
+        'Supabase admin client requires NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SECRET_KEY'
+      );
+    }
+    const value = (client as any)[prop];
+    if (typeof value === 'function') {
+      return value.bind(client);
+    }
+    return value;
+  },
+});
 
-  return (
-    allowed.includes(email.toLowerCase()) ||
-    email.toLowerCase().startsWith('admin@')
-  );
+
+function parseDbRoadmapRecord(data: any): DbRoadmapRecord {
+  const rawJson =
+    typeof data.json === 'string'
+      ? JSON.parse(data.json)
+      : data.json || {};
+
+  const stages = rawJson.stages || [];
+  const theme = rawJson.theme || {};
+  const overrides = rawJson.overrides || DEFAULT_LAYOUT_OVERRIDES;
+
+  return {
+    id: data.id,
+    slug: data.slug,
+    title: data.title,
+    subtitle: data.subtitle || '',
+    version: Number(data.version) || 1,
+    tag: data.tag || 'latest',
+    is_latest: data.is_latest !== undefined ? Boolean(data.is_latest) : true,
+    json: {
+      stages,
+      theme,
+      overrides,
+      ...rawJson,
+    },
+    created_at: data.created_at,
+    updated_at: data.updated_at,
+  };
 }
 
-/**
- * Loads the roadmap row for the given slug (and optional version).
- * If version is omitted, loads the latest version (ordered by version descending).
- * All roadmap data (stages, theme, overrides) lives inside the consolidated `json` column.
- */
 export async function getLatestRoadmapFromDb(
-  slug: string,
-  version?: number
+  slug: string
 ): Promise<DbRoadmapRecord | null> {
   const client = getSupabaseServerClient();
   if (!client) return null;
 
   try {
-    let query = client
+    // 1. Strictly look for row marked is_latest === true
+    const { data, error } = await client
       .from('roadmaps')
       .select('*')
-      .eq('slug', slug);
-
-    if (version !== undefined && !isNaN(version)) {
-      query = query.eq('version', version);
-    } else {
-      query = query.order('version', { ascending: false });
-    }
-
-    const { data, error } = await query.limit(1).maybeSingle();
+      .eq('slug', slug)
+      .eq('is_latest', true)
+      .limit(1)
+      .maybeSingle();
 
     if (error) {
-      console.warn(`[Supabase] Error querying roadmap for "${slug}":`, error.message);
+      console.warn(`[Supabase] Error querying latest roadmap for "${slug}":`, error.message);
+      return null;
+    }
+
+    if (data) {
+      return parseDbRoadmapRecord(data);
+    }
+
+    // 2. Fallback if is_latest has not yet been set on legacy data
+    const { data: fallbackData, error: fallbackError } = await client
+      .from('roadmaps')
+      .select('*')
+      .eq('slug', slug)
+      .order('version', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (fallbackError || !fallbackData) return null;
+
+    return parseDbRoadmapRecord(fallbackData);
+  } catch (e: any) {
+    console.warn(`[Supabase] Exception querying latest roadmap for "${slug}":`, e.message);
+    return null;
+  }
+}
+
+export async function getRoadmapByVersionFromDb(
+  slug: string,
+  version: number
+): Promise<DbRoadmapRecord | null> {
+  const client = getSupabaseServerClient();
+  if (!client) return null;
+
+  try {
+    const { data, error } = await client
+      .from('roadmaps')
+      .select('*')
+      .eq('slug', slug)
+      .eq('version', version)
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.warn(`[Supabase] Error querying roadmap for "${slug}" v${version}:`, error.message);
       return null;
     }
 
     if (!data) return null;
 
-    // Parse the consolidated `json` column
-    const rawJson =
-      typeof data.json === 'string'
-        ? JSON.parse(data.json)
-        : data.json || {};
-
-    const stages =
-      rawJson.stages ||
-      (typeof data.stages === 'string' ? JSON.parse(data.stages) : data.stages) ||
-      [];
-
-    const theme =
-      rawJson.theme ||
-      (typeof data.theme === 'string' ? JSON.parse(data.theme) : data.theme) ||
-      {};
-
-    const overrides =
-      rawJson.overrides ||
-      (typeof data.overrides === 'string'
-        ? JSON.parse(data.overrides)
-        : data.overrides) || {
-        nodeOffsets: {},
-        edgePoints: {},
-        customEdges: [],
-        removedEdgeIds: [],
-      };
-
-    return {
-      id: data.id,
-      slug: data.slug,
-      title: data.title,
-      subtitle: data.subtitle || '',
-      version: Number(data.version) || 1,
-      tag: data.tag || 'latest',
-      is_latest: data.is_latest !== undefined ? Boolean(data.is_latest) : true,
-      json: {
-        stages,
-        theme,
-        overrides,
-        ...rawJson,
-      },
-      created_at: data.created_at,
-      updated_at: data.updated_at,
-    };
+    return parseDbRoadmapRecord(data);
   } catch (e: any) {
-    console.warn(`[Supabase] Exception querying roadmap for "${slug}":`, e.message);
+    console.warn(`[Supabase] Exception querying roadmap for "${slug}" v${version}:`, e.message);
     return null;
   }
 }
 
-/**
- * Saves roadmap data.
- * - When overrideCurrent is FALSE (default): creates a completely NEW row in the roadmaps table
- *   with an incremented version (nextVersion) so older versions are preserved, and unsets is_latest on old rows.
- * - When overrideCurrent is TRUE: updates the existing latest row in place without bumping version.
- */
 export async function saveRoadmapToDb(
   payload: SaveRoadmapPayload
 ): Promise<{ success: boolean; version: number; error?: string }> {
@@ -208,22 +204,14 @@ export async function saveRoadmapToDb(
       ? Number(latestRow.version) || 1
       : (payload.version || 1);
 
-    // Consolidate stages, theme & overrides into the consolidated `json` column
     const consolidatedJson = {
       stages: payload.stages || [],
       theme: payload.theme || {},
-      overrides: payload.overrides || {
-        nodeOffsets: {},
-        edgePoints: {},
-        customEdges: [],
-        removedEdgeIds: [],
-      },
+      overrides: payload.overrides || DEFAULT_LAYOUT_OVERRIDES,
       ...(payload.json || {}),
     };
 
     if (payload.overrideCurrent && latestRow?.id) {
-      // MODE 1: OVERRIDE CURRENT
-      // Overwrite the existing row in place without bumping version number
       const { error: updateError } = await client
         .from('roadmaps')
         .update({
@@ -243,11 +231,7 @@ export async function saveRoadmapToDb(
 
       return { success: true, version: currentVersionNumber };
     } else {
-      // MODE 2: CREATE COMPLETELY NEW ROW DATA WITH UPDATED VERSION
-      // 1. Calculate incremented version number
       const nextVersion = latestRow ? currentVersionNumber + 1 : (payload.version || 1);
-
-      // 2. Mark older versions as is_latest: false
       if (latestRow) {
         const { error: unsetError } = await client
           .from('roadmaps')
@@ -259,7 +243,6 @@ export async function saveRoadmapToDb(
         }
       }
 
-      // 3. Insert a completely NEW row with the incremented version
       const newRowData = {
         slug: payload.slug,
         title: payload.title,
@@ -279,7 +262,7 @@ export async function saveRoadmapToDb(
       if (insertError) {
         console.error('[Supabase] Insert new version error:', insertError);
 
-        // Friendly guidance if database still has single-slug unique constraint
+        // Guidance if database still has single-slug unique constraint
         if (
           insertError.code === '23505' &&
           (insertError.message.includes('roadmaps_slug_key') ||

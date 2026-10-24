@@ -44,7 +44,7 @@ export async function POST(req: Request) {
       revalidateTag(`roadmap-${slug}`, 'max');
       revalidateTag('roadmaps', 'max');
       revalidatePath(`/roadmap/${slug}`);
-      revalidatePath(`/roadmap/${slug}/editor`);
+      revalidatePath('/roadmap/editor');
     } catch (e) {}
 
     return NextResponse.json({

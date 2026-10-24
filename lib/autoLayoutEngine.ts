@@ -5,8 +5,11 @@ import {
   RoadmapEdge,
   RoadmapLayoutOverrides,
   RoadmapThemeConfig,
+  TopicRequirementTag,
+  toTopicSlugId,
 } from '@/types/roadmap';
 import { DEFAULT_ROADMAP_THEME } from '@/config/theme';
+import { resolveEdgeControlPoints, getEdgePath } from '@/lib/svgEdgeUtils';
 
 export function wrapTopicLabel(
   label: string,
@@ -56,23 +59,166 @@ export function computeBoundingBox(nodes: RoadmapNode[], pad = 44) {
   };
 }
 
+/**
+ * Computes all vector geometry, edge spline paths (d), border cutout masks,
+ * and text baseline positions so that the SVG view remains a purely declarative
+ * template with zero math calculations at render time.
+ */
+export function computeRenderGeometry(
+  graph: RoadmapGraph,
+  theme: RoadmapThemeConfig = DEFAULT_ROADMAP_THEME
+): RoadmapGraph {
+  const order: Record<string, number> = {
+    section: 0,
+    subsection: 1,
+    milestone: 2,
+    title: 2,
+    topic: 3,
+    subtopic: 3,
+  };
+
+  const updatedNodes = graph.nodes.map((node) => {
+    const centerX = Math.round(node.x + node.width / 2);
+    const centerY = Math.round(node.y + node.height / 2);
+
+    if (node.type === 'section' || node.type === 'subsection') {
+      const isSub = node.type === 'subsection';
+      const boxStyle = isSub ? theme.nodes.subsection : theme.nodes.section;
+      const titleOnBorder = boxStyle.titleOnBorder ?? true;
+      const padX = boxStyle.borderTitlePaddingX ?? 14;
+      const estTextW = node.label
+        ? Math.ceil(node.label.length * (boxStyle.fontSize * 0.6))
+        : 0;
+      const maskW = estTextW + padX * 2;
+      const maskX = Math.round(centerX - maskW / 2);
+      const borderMask =
+        node.label && titleOnBorder
+          ? {
+              x: maskX,
+              y: node.y - 10,
+              width: maskW,
+              height: 20,
+            }
+          : undefined;
+
+      const titleY = titleOnBorder ? node.y : node.y + (isSub ? 20 : 23);
+
+      return {
+        ...node,
+        centerX,
+        centerY,
+        titleY,
+        borderMask,
+      };
+    }
+
+    if (node.type === 'topic' || node.type === 'subtopic') {
+      const isSubtopic = node.type === 'subtopic';
+      const baseBoxStyle = isSubtopic
+        ? theme.nodes.subtopic
+        : theme.nodes.topic;
+
+      const titleLines =
+        node.lines && node.lines.length > 0 ? node.lines : [node.label];
+      const hasSubtext = Boolean(node.subtext && node.subtext.length > 0);
+      const fontSize = baseBoxStyle.fontSize;
+      const lineSpacing = Math.round(fontSize * 1.2);
+      const titleBlockHeight = (titleLines.length - 1) * lineSpacing;
+      const firstTitleY = hasSubtext
+        ? node.y + 18
+        : Math.round(node.y + node.height / 2 - titleBlockHeight / 2);
+
+      const renderedLines = titleLines.map((line, lIdx) => ({
+        text: line,
+        y: firstTitleY + lIdx * lineSpacing,
+      }));
+
+      const renderedSubtext = node.subtext?.map((subLine, sIdx) => ({
+        text: subLine,
+        y: firstTitleY + titleLines.length * lineSpacing + 6 + sIdx * 15,
+      }));
+
+      return {
+        ...node,
+        centerX,
+        centerY,
+        renderedLines,
+        renderedSubtext,
+        badgeX: node.x + node.width - 6,
+        badgeY: node.y + 6,
+      };
+    }
+
+    return {
+      ...node,
+      centerX,
+      centerY,
+    };
+  });
+
+  // Layer order: sections & subsections (0, 1), milestones & titles (2), topics & subtopics (3)
+  const sortedNodes = [...updatedNodes].sort(
+    (a, b) => (order[a.type] ?? 3) - (order[b.type] ?? 3)
+  );
+
+  const updatedNodeMap = new Map(sortedNodes.map((n) => [n.id, n]));
+
+  const updatedEdges = graph.edges.map((edge) => {
+    const edgeCfg =
+      edge.type === 'spine-edge'
+        ? theme.edges.spine
+        : edge.type === 'sub-branch-edge'
+          ? theme.edges.subBranch
+          : theme.edges.branch;
+
+    const controlPoints = resolveEdgeControlPoints(
+      edge,
+      updatedNodeMap,
+      edgeCfg.controlPointsCount
+    );
+    const d = getEdgePath(edge, updatedNodeMap, edgeCfg.curveStyle, controlPoints) || '';
+
+    return {
+      ...edge,
+      d,
+    };
+  });
+
+  const viewBox = `${graph.minX} ${graph.minY} ${graph.width} ${graph.height}`;
+
+  return {
+    ...graph,
+    viewBox,
+    nodes: sortedNodes,
+    edges: updatedEdges,
+  };
+}
+
 export function applyLayoutOverrides(
   baseGraph: RoadmapGraph,
-  overrides?: RoadmapLayoutOverrides
+  overrides?: RoadmapLayoutOverrides,
+  theme: RoadmapThemeConfig = DEFAULT_ROADMAP_THEME
 ): RoadmapGraph {
-  if (!overrides) return baseGraph;
+  if (!overrides) return computeRenderGeometry(baseGraph, theme);
 
   const removedSet = new Set(overrides.removedEdgeIds || []);
+  const tagMap = overrides.topicTags || {};
 
   const updatedNodes = baseGraph.nodes.map((node) => {
     const ov = overrides.nodeOffsets?.[node.id];
-    if (!ov) return node;
+    const customTag = tagMap[node.topicId] ?? tagMap[node.label] ?? node.tag ?? 'none';
+    const label =
+      node.id === 'roadmap-main-title' && overrides.canvasTitle !== undefined
+        ? (overrides.canvasTitle.trim() || node.label)
+        : node.label;
     return {
       ...node,
-      x: Math.round(node.x + (ov.dx || 0)),
-      y: Math.round(node.y + (ov.dy || 0)),
-      width: ov.width ?? node.width,
-      height: ov.height ?? node.height,
+      label,
+      tag: customTag,
+      x: ov ? Math.round(node.x + (ov.dx || 0)) : node.x,
+      y: ov ? Math.round(node.y + (ov.dy || 0)) : node.y,
+      width: ov?.width ?? node.width,
+      height: ov?.height ?? node.height,
     };
   });
 
@@ -87,7 +233,7 @@ export function applyLayoutOverrides(
   const allEdges = [...baseEdges, ...(overrides.customEdges || [])];
   const bounds = computeBoundingBox(updatedNodes, 44);
 
-  return {
+  const resultingGraph: RoadmapGraph = {
     minX: bounds.minX,
     minY: bounds.minY,
     width: bounds.width,
@@ -95,6 +241,8 @@ export function applyLayoutOverrides(
     nodes: updatedNodes,
     edges: allEdges,
   };
+
+  return computeRenderGeometry(resultingGraph, theme);
 }
 
 export function buildRoadmapFromSchema(
@@ -125,10 +273,12 @@ export function buildRoadmapFromSchema(
   let rightY = 115;
   let lastMilestoneY = 75;
 
+  const displayTitle = overrides?.canvasTitle?.trim() || title;
   const titleId = 'roadmap-main-title';
   nodes.push({
     id: titleId,
-    label: title,
+    topicId: toTopicSlugId(displayTitle),
+    label: displayTitle,
     type: 'title',
     clickable: false,
     x: SPINE_X - 200,
@@ -149,6 +299,7 @@ export function buildRoadmapFromSchema(
 
     nodes.push({
       id,
+      topicId: id,
       stageId,
       label: '',
       type: 'milestone',
@@ -182,6 +333,8 @@ export function buildRoadmapFromSchema(
     if (stage.standaloneTopic && stage.topics && stage.topics.length > 0) {
       const raw = stage.topics[0];
       const label = typeof raw === 'string' ? raw : raw.label;
+      const tag: TopicRequirementTag =
+        typeof raw === 'string' ? 'none' : raw.tag || 'none';
       const boxW = Math.max(210, Math.ceil(label.length * charWidthTopic) + 44);
       const boxH = 38;
       const boxX = isLeft
@@ -194,9 +347,11 @@ export function buildRoadmapFromSchema(
       const topicId = 'topic-' + stage.id;
       nodes.push({
         id: topicId,
+        topicId: toTopicSlugId(label),
         stageId: stage.id,
         label,
         lines: [label],
+        tag,
         type: 'topic',
         clickable: true,
         x: boxX,
@@ -245,6 +400,7 @@ export function buildRoadmapFromSchema(
       const secId = 'sec-' + stage.id;
       nodes.push({
         id: secId,
+        topicId: toTopicSlugId(stage.title || stage.id),
         stageId: stage.id,
         label: stage.title || '',
         type: 'section',
@@ -271,6 +427,7 @@ export function buildRoadmapFromSchema(
 
         nodes.push({
           id: grpId,
+          topicId: toTopicSlugId(grp.title || grp.id),
           parentId: secId,
           stageId: stage.id,
           label: grp.title,
@@ -285,6 +442,7 @@ export function buildRoadmapFromSchema(
         grp.topics.forEach((tLabel, tIdx) => {
           nodes.push({
             id: 'topic-' + grp.id + '-' + tIdx,
+            topicId: toTopicSlugId(tLabel),
             parentId: secId,
             stageId: stage.id,
             label: tLabel,
@@ -292,6 +450,7 @@ export function buildRoadmapFromSchema(
               tLabel,
               Math.floor((groupW - groupPad * 2 - 14) / charWidthSubtopic)
             ),
+            tag: 'none',
             type: 'subtopic',
             clickable: true,
             x: gx + groupPad,
@@ -317,6 +476,8 @@ export function buildRoadmapFromSchema(
     const preparedTopics = topics.map((raw) => {
       const label = typeof raw === 'string' ? raw : raw.label;
       const subtext = typeof raw === 'string' ? undefined : raw.subtext;
+      const tag: TopicRequirementTag =
+        typeof raw === 'string' ? 'none' : raw.tag || 'none';
       const lines = wrapTopicLabel(label, maxCharsPerLine);
       const baseH = lines.length > 1 ? 22 + lines.length * 17 : 36;
       const subH =
@@ -325,6 +486,7 @@ export function buildRoadmapFromSchema(
         label,
         lines,
         subtext,
+        tag,
         height: baseH + subH,
       };
     });
@@ -350,6 +512,7 @@ export function buildRoadmapFromSchema(
     const secId = 'sec-' + stage.id;
     nodes.push({
       id: secId,
+      topicId: toTopicSlugId(stage.title || stage.id),
       stageId: stage.id,
       label: stage.title || '',
       type: 'section',
@@ -387,6 +550,7 @@ export function buildRoadmapFromSchema(
         const tId = 'topic-' + stage.id + '-' + tIdx;
         nodes.push({
           id: tId,
+          topicId: toTopicSlugId(item.label),
           parentId: secId,
           stageId: stage.id,
           label: item.label,
@@ -397,6 +561,7 @@ export function buildRoadmapFromSchema(
             )
             : item.lines,
           subtext: item.subtext,
+          tag: item.tag,
           type: 'topic',
           clickable: true,
           x: tx,
@@ -428,10 +593,13 @@ export function buildRoadmapFromSchema(
 
         const subPrepared = sub.topics.map((raw) => {
           const sLabel = typeof raw === 'string' ? raw : raw.label;
+          const sTag: TopicRequirementTag =
+            typeof raw === 'string' ? 'none' : raw.tag || 'none';
           const sLines = wrapTopicLabel(sLabel, subMaxChars);
           return {
             label: sLabel,
             lines: sLines,
+            tag: sTag,
             height: sLines.length > 1 ? 20 + sLines.length * 16 : 32,
           };
         });
@@ -452,6 +620,7 @@ export function buildRoadmapFromSchema(
         const subSecId = 'subsec-' + sub.id;
         nodes.push({
           id: subSecId,
+          topicId: toTopicSlugId(sub.title || sub.id),
           stageId: stage.id,
           label: sub.title || '',
           type: 'subsection',
@@ -489,10 +658,12 @@ export function buildRoadmapFromSchema(
 
             nodes.push({
               id: 'topic-' + sub.id + '-' + stIdx,
+              topicId: toTopicSlugId(sItem.label),
               parentId: subSecId,
               stageId: stage.id,
               label: sItem.label,
               lines: sItem.lines,
+              tag: sItem.tag,
               type: 'subtopic',
               clickable: true,
               x: stX,
@@ -517,6 +688,7 @@ export function buildRoadmapFromSchema(
   const footerId = 'roadmap-footer';
   nodes.push({
     id: footerId,
+    topicId: 'keep_learning',
     label: 'Keep Learning :)',
     type: 'title',
     clickable: false,
@@ -544,5 +716,5 @@ export function buildRoadmapFromSchema(
     edges,
   };
 
-  return applyLayoutOverrides(baseGraph, overrides);
+  return applyLayoutOverrides(baseGraph, overrides, theme);
 }

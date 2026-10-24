@@ -1,6 +1,5 @@
 import { redirect } from 'next/navigation';
-import { cookies } from 'next/headers';
-import { createClient, isAdminEmail } from '@/lib/supabase/server';
+import { createClient } from '@/lib/supabase/server';
 
 export interface UserClaims {
   sub: string;
@@ -45,15 +44,11 @@ export async function requireUser(): Promise<UserClaims> {
 }
 
 /**
- * Checks if the claims represent an admin:
- * 1. checks app_metadata.role === 'admin'
- * 2. or fallback to configured ADMIN_EMAILS
+ * Checks if the claims represent an admin (app_metadata.role === 'admin').
  */
 export function isClaimsAdmin(claims?: UserClaims | null): boolean {
   if (!claims) return false;
-  if (claims.app_metadata?.role === 'admin') return true;
-  if (claims.email && isAdminEmail(claims.email)) return true;
-  return false;
+  return claims.app_metadata?.role === 'admin';
 }
 
 /**
